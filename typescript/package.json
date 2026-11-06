@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Universal AI Agent Gateway & FinOps Client SDK for TypeScript / Node.js",
   "license": "Apache-2.0",
+  "author": "AgentFinOps & AgentPay Core Team",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-agentpay/agent-core-sdk.git"
+  },
+  "homepage": "https://openagentpay.dev/",
+  "bugs": {
+    "url": "https://github.com/open-agentpay/agent-core-sdk/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
