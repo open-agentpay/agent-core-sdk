@@ -193,7 +193,7 @@ export class PaymentRequest {
   get isAgentpayWallet(): boolean {
     return this.network === AGENTPAY_INTERNAL_NETWORK;
   }
-  get is_agent-core-sdk_wallet(): boolean {
+  get is_internal_wallet(): boolean {
     return this.isAgentpayWallet;
   }
 

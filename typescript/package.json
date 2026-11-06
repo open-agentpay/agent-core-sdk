@@ -1,5 +1,5 @@
 {
-  "name": "agent-core-sdk",
+  "name": "agentpay-core-sdk",
   "version": "0.1.0",
   "description": "Universal AI Agent Gateway & FinOps Client SDK for TypeScript / Node.js",
   "license": "Apache-2.0",
@@ -34,6 +34,15 @@
       "default": "./dist/integrations/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run"
@@ -46,5 +55,14 @@
     "cost-governance",
     "langchain",
     "vercel-ai"
-  ]
+  ],
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "viem": "^2.57.16"
+  }
 }

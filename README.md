@@ -1,11 +1,21 @@
 # agent-core-sdk ⚡
 
+[![PyPI](https://img.shields.io/pypi/v/agentpay-core-sdk.svg?label=PyPI%20(agentpay-core-sdk))](https://pypi.org/project/agentpay-core-sdk/)
+[![npm](https://img.shields.io/npm/v/agentpay-core-sdk.svg?label=npm%20(agentpay-core-sdk))](https://www.npmjs.com/package/agentpay-core-sdk)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue.svg)](https://www.typescriptlang.org)
 [![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8.svg)](https://golang.org)
 
-**`agent-core-sdk`** is the universal, vendor-neutral financial firewall, runtime policy engine, and high-performance gateway core for autonomous AI agents and enterprise LLM infrastructure.
+**`agent-core-sdk`** (published on PyPI and npm as **`agentpay-core-sdk`**) is the universal, vendor-neutral financial firewall, runtime policy engine, and high-performance gateway core for autonomous AI agents and enterprise LLM infrastructure.
+
+```bash
+# Python
+pip install agentpay-core-sdk
+
+# Node.js / TypeScript
+npm install agentpay-core-sdk
+```
 
 It prevents runaway autonomous agent loops, enforces strict multi-tenant budget ceilings, and enables pluggable micro-metering and settlement across both traditional enterprise quota systems and decentralized settlement rails.
 

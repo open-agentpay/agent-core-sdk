@@ -19,7 +19,7 @@ export const HEADER_PAYMENT_SIGNATURE = 'PAYMENT-SIGNATURE';
 // ---------------------------------------------------------------------------
 
 /** Encode bytes or string into unpadded Base64URL string. */
-export function base64urlEncode(data: Uint8Array | Buffer | string): string {
+export function base64urlEncode(data: Uint8Array | string): string {
   const buf = typeof data === 'string' ? Buffer.from(data, 'utf-8') : Buffer.from(data);
   return buf
     .toString('base64')
