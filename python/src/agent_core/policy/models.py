@@ -28,8 +28,8 @@ from agent_core.policy.errors import PolicyErrorCode
 # CAIP-2: namespace:reference  (e.g. eip155:84532)
 _CAIP2_RE = re.compile(r"^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$")
 
-# Canonical EVM address: 0x followed by exactly 40 hex chars
-_EVM_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+# Canonical EVM address or enterprise tenant/agent ID
+_EVM_ADDRESS_RE = re.compile(r"^(0x[0-9a-fA-F]{40}|[a-zA-Z0-9_\-\:]{3,66})$")
 _AGENTPAY_ROUTE_RE = re.compile(r"^agentpay:route:[A-Za-z0-9_-]+$")
 _AGENTPAY_INTERNAL_NETWORK = "agentpay:internal-ledger"
 _WALLET_FIAT_CURRENCIES = frozenset({"CNY", "USD", "EUR"})
