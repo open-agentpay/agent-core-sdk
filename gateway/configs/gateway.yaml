@@ -1,0 +1,66 @@
+# ==============================================================================
+# AgentPay Go Gateway Configuration (v2.0.0)
+# ==============================================================================
+
+version: "2.0.0"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  read_timeout_seconds: 15.0
+  write_timeout_seconds: 30.0
+  idle_timeout_seconds: 60.0
+  shutdown_timeout_seconds: 10.0
+
+auth:
+  jwt_secret: "REPLACE_ME_WITH_SECURE_SECRET_MIN_32_CHARS" 
+  token_duration_hours: 24
+
+database:
+  # In production, configure credentials securely or via AGENTPAY_POSTGRES_URL environment variable
+  postgres_url: "postgres://user:password@localhost:5432/agentpay?sslmode=disable"
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime_seconds: 300
+
+facilitator:
+  url: "http://127.0.0.1:8001"
+  timeout_seconds: 5.0
+
+settlement:
+  default_network: "eip155:421614"                        # Arbitrum Sepolia
+  default_asset: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d" # USDC
+  default_asset_symbol: "USDC"
+  default_asset_decimals: 6
+  default_pay_to: "0x0000000000000000000000000000000000000000" # Replace with your payee wallet address
+
+logger:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+  health_path: "/healthz"
+  ready_path: "/readyz"
+
+routes:
+  - route_id: "rou_market_data"
+    path: "/v1/market-data"
+    upstream: "https://httpbin.org/get"
+    price_base_units: 1000
+    asset: "USDC"
+    payee_address: "0x0000000000000000000000000000000000000000"
+    allowed_payment_methods: "both"
+    timeout_seconds: 10.0
+    rate_limit_rpm: 600
+
+  - route_id: "rou_llm_inference"
+    path: "/v1/chat/completions"
+    upstream: "https://httpbin.org/post"
+    price_base_units: 10000
+    asset: "USDC"
+    payee_address: "0x0000000000000000000000000000000000000000"
+    allowed_payment_methods: "wallet"
+    timeout_seconds: 60.0
+    rate_limit_rpm: 120
