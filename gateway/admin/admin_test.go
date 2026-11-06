@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
-	"github.com/agent-core-sdk/gateway/auth"
-	"github.com/agent-core-sdk/gateway/wallet"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/auth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
 func setupTestService() (*MemoryService, *agent.Registry, wallet.Service) {

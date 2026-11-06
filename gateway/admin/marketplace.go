@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/usage"
+	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
 )
 
 var slugSanitizeRegex = regexp.MustCompile(`[^a-z0-9\-]+`)

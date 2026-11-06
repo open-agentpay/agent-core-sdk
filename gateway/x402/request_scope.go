@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
-	"github.com/agent-core-sdk/gateway/payment"
-	"github.com/agent-core-sdk/gateway/rcu"
-	"github.com/agent-core-sdk/gateway/usage"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
 )
 
 const defaultProjectID = "prj_default"

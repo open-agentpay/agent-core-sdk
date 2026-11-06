@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 )
 
 // onchainParams is the resolved on-chain settlement view of a route.

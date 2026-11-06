@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/x402"
+	"github.com/open-agentpay/agent-core-sdk/gateway/x402"
 )
 
 // Service defines the virtual wallet and ledger management interface.

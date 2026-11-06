@@ -1,4 +1,4 @@
-module github.com/agent-core-sdk/gateway
+module github.com/open-agentpay/agent-core-sdk/gateway
 
 go 1.21
 

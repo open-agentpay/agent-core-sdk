@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 )
 
 func TestResolveOnchainAsset(t *testing.T) {

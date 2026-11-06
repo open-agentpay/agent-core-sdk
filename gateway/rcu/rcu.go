@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/agent-core-sdk/gateway/upstreamauth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
 )
 
 var (

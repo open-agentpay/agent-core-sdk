@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
-	"github.com/agent-core-sdk/gateway/auth"
-	"github.com/agent-core-sdk/gateway/payment"
-	"github.com/agent-core-sdk/gateway/rcu"
-	"github.com/agent-core-sdk/gateway/timeline"
-	"github.com/agent-core-sdk/gateway/upstreamauth"
-	"github.com/agent-core-sdk/gateway/usage"
-	"github.com/agent-core-sdk/gateway/wallet"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/auth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/timeline"
+	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
 // LargeAdjustmentThreshold defines amount beyond which dual control / audit alert is needed.

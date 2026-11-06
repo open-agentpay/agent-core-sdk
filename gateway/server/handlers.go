@@ -9,10 +9,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/admin"
-	"github.com/agent-core-sdk/gateway/metrics"
-	"github.com/agent-core-sdk/gateway/rcu"
-	"github.com/agent-core-sdk/gateway/x402"
+	"github.com/open-agentpay/agent-core-sdk/gateway/admin"
+	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/x402"
 )
 
 var (

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 )
 
 // Service defines the interface for Agent timeline reading and indexing (T5.8).

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/x402"
+	"github.com/open-agentpay/agent-core-sdk/gateway/x402"
 )
 
 // CryptoSettlementAdapter handles overseas Web3/EVM blockchain settlements via Facilitator.

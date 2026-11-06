@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/agent-core-sdk/gateway/rcu"
-	"github.com/agent-core-sdk/gateway/upstreamauth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
 )
 
 // Standard domain errors.

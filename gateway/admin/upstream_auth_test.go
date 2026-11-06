@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/auth"
-	"github.com/agent-core-sdk/gateway/upstreamauth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/auth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
 )
 
 func TestUpstreamAuthEndpointsAndLifecycle(t *testing.T) {

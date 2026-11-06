@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 )
 
 // PostgresService implements persistent storage and read model indexing in PostgreSQL (T5.8).

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/x402"
+	"github.com/open-agentpay/agent-core-sdk/gateway/x402"
 )
 
 // MemoryService provides an in-memory, thread-safe implementation of Service.

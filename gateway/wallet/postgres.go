@@ -8,7 +8,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/agent-core-sdk/gateway/x402"
+	"github.com/open-agentpay/agent-core-sdk/gateway/x402"
 )
 
 // PostgresService implements the Service interface against a PostgreSQL 15+ database.

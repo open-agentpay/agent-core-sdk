@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/metrics"
-	"github.com/agent-core-sdk/gateway/payment"
-	"github.com/agent-core-sdk/gateway/proxy"
-	"github.com/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
+	"github.com/open-agentpay/agent-core-sdk/gateway/proxy"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

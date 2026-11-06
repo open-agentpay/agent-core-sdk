@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/metrics"
-	"github.com/agent-core-sdk/gateway/rcu"
-	"github.com/agent-core-sdk/gateway/upstreamauth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
 )
 
 var pathPlaceholderRegex = regexp.MustCompile(`\{([a-zA-Z0-9_.\-]+)\}`)

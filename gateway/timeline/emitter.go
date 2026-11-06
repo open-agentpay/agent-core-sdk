@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 )
 
 // TimelineAuditEmitter wraps a timeline.Service as an agent.AuditEmitter.

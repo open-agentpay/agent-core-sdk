@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/wallet"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
 // QuotaSettlementAdapter handles domestic & enterprise FinOps quota management.

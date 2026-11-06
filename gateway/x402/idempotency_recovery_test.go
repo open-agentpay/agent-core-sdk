@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/metrics"
-	"github.com/agent-core-sdk/gateway/proxy"
-	"github.com/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	"github.com/open-agentpay/agent-core-sdk/gateway/proxy"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 )
 
 func TestWalletIdempotencyCacheHit(t *testing.T) {

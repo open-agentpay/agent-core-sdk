@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 )
 
 func TestMemoryTimelineService(t *testing.T) {

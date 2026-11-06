@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/rcu"
-	"github.com/agent-core-sdk/gateway/upstreamauth"
-	"github.com/agent-core-sdk/gateway/wallet"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
 var (

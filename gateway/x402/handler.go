@@ -15,14 +15,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
-	"github.com/agent-core-sdk/gateway/idempotency"
-	"github.com/agent-core-sdk/gateway/metrics"
-	"github.com/agent-core-sdk/gateway/payment"
-	"github.com/agent-core-sdk/gateway/proxy"
-	"github.com/agent-core-sdk/gateway/rcu"
-	"github.com/agent-core-sdk/gateway/recovery"
-	"github.com/agent-core-sdk/gateway/usage"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/idempotency"
+	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
+	"github.com/open-agentpay/agent-core-sdk/gateway/proxy"
+	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/recovery"
+	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
 )
 
 // WalletAccount represents the state of a virtual wallet.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 )
 
 var (

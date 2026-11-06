@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-core-sdk/gateway/usage"
+	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
 )
 
 func TestPublicMarketplaceEndpoints(t *testing.T) {
