@@ -1,0 +1,81 @@
+{
+  "name": "agentpay-core-sdk",
+  "version": "0.1.2",
+  "description": "Universal AI Agent Gateway & FinOps Client SDK for TypeScript / Node.js",
+  "license": "Apache-2.0",
+  "author": "AgentFinOps & AgentPay Core Team",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-agentpay/agent-core-sdk.git"
+  },
+  "homepage": "https://openagentpay.dev/",
+  "bugs": {
+    "url": "https://github.com/open-agentpay/agent-core-sdk/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
+    "./policy": {
+      "types": "./dist/policy/index.d.ts",
+      "import": "./dist/policy/index.js",
+      "default": "./dist/policy/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js",
+      "default": "./dist/client/index.js"
+    },
+    "./state": {
+      "types": "./dist/state/index.d.ts",
+      "import": "./dist/state/index.js",
+      "default": "./dist/state/index.js"
+    },
+    "./integrations": {
+      "types": "./dist/integrations/index.d.ts",
+      "import": "./dist/integrations/index.js",
+      "default": "./dist/integrations/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "ai-agent",
+    "llm-gateway",
+    "finops",
+    "token-metering",
+    "cost-governance",
+    "langchain",
+    "vercel-ai"
+  ],
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  }
+}
