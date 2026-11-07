@@ -13,7 +13,7 @@ from agent_core.client.client import (
 from agent_core.policy.models import PolicyConfig
 from agent_core.policy.sqlite_engine import SQLitePolicyEngine
 
-__version__ = "0.1.2"
+__version__ = "0.3.0"
 
 __all__ = [
     "AgentCoreClient",
