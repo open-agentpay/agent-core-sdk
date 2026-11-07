@@ -58,6 +58,7 @@ type ServerOptions struct {
 	SettlementAdapter settlement.SettlementAdapter
 	WalletSvc         wallet.Service
 	Transport         http.RoundTripper
+	AssetResolver     x402.AssetResolver
 }
 
 // WithPaymentVerifier provides a custom PaymentVerifier implementation.
@@ -68,6 +69,11 @@ func WithPaymentVerifier(v x402.PaymentVerifier) Option {
 // WithSettlementAdapter provides a custom SettlementAdapter implementation.
 func WithSettlementAdapter(a settlement.SettlementAdapter) Option {
 	return func(o *ServerOptions) { o.SettlementAdapter = a }
+}
+
+// WithAssetResolver provides a custom AssetResolver implementation.
+func WithAssetResolver(r x402.AssetResolver) Option {
+	return func(o *ServerOptions) { o.AssetResolver = r }
 }
 
 // WithWalletService provides an explicit wallet service implementation.
@@ -232,6 +238,9 @@ func NewWithOptions(
 	}
 
 	processor := x402.NewPaymentProcessor(verifier, nonceStore, walletSvc, proxyHandler, m)
+	if opts.AssetResolver != nil {
+		processor.SetAssetResolver(opts.AssetResolver)
+	}
 	if cfg != nil {
 		processor.SetSettlementDefaults(x402.SettlementDefaults{
 			DefaultNetwork:       cfg.Settlement.DefaultNetwork,

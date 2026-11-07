@@ -284,10 +284,14 @@ class PaymentChallenge(BaseModel):
         if self.scheme == "agentpay-wallet":
             if (
                 self.network != "agentpay:internal-ledger"
-                or self.asset not in WALLET_FIAT_CURRENCIES
+                or (self.asset or "").upper() not in WALLET_FIAT_CURRENCIES
                 or not self.resource_uri
             ):
-                raise X402ValidationError("invalid agentpay-wallet challenge fields", code=X402ErrorCode.INVALID_SCHEME)
+                # If network is onchain (e.g. eip155:...) from a legacy/dual-channel gateway, normalize to transfer-authorization
+                if self.network and self.network.startswith("eip155:"):
+                    object.__setattr__(self, "scheme", "transfer-authorization")
+                else:
+                    raise X402ValidationError("invalid agentpay-wallet challenge fields", code=X402ErrorCode.INVALID_SCHEME)
         elif not self.network or not self.asset or not self.payee:
             raise X402ValidationError(
                 f"{self.scheme} challenge requires network, asset, and payee",

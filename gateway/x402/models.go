@@ -15,13 +15,14 @@ import (
 )
 
 const (
-	HeaderPaymentRequired  = "PAYMENT-REQUIRED"
-	HeaderPaymentSignature = "PAYMENT-SIGNATURE"
-	HeaderIdempotencyKey   = "Idempotency-Key"
-	DefaultVersion         = "2.0"
-	DefaultScheme          = "agentpay-wallet"
-	WalletScheme           = "agentpay-wallet"
-	DefaultChallengeTTL    = 300 * time.Second // 5 minutes
+	HeaderPaymentRequired       = "PAYMENT-REQUIRED"
+	HeaderPaymentSignature      = "PAYMENT-SIGNATURE"
+	HeaderIdempotencyKey        = "Idempotency-Key"
+	DefaultVersion              = "2.0"
+	DefaultScheme               = "agentpay-wallet"
+	WalletScheme                = "agentpay-wallet"
+	TransferAuthorizationScheme = "transfer-authorization"
+	DefaultChallengeTTL         = 300 * time.Second // 5 minutes
 )
 
 // PaymentChallenge represents the structured 402 challenge issued to the buyer.
@@ -191,6 +192,10 @@ func NewChallenge(network, asset, assetSymbol string, decimals int, amount, paye
 		ttl = DefaultChallengeTTL
 	}
 	now := time.Now().Unix()
+	scheme := TransferAuthorizationScheme
+	if network == "agentpay:internal-ledger" {
+		scheme = WalletScheme
+	}
 	return &PaymentChallenge{
 		Version:        DefaultVersion,
 		ChallengeID:    generateChallengeID(),
@@ -200,10 +205,10 @@ func NewChallenge(network, asset, assetSymbol string, decimals int, amount, paye
 		Decimals:       decimals,
 		Amount:         amount,
 		Payee:          payee,
-		Scheme:         DefaultScheme,
-		ValidAfter:  now,
-		ValidBefore: now + int64(ttl.Seconds()),
-		ResourceURI: resourceURI,
+		Scheme:         scheme,
+		ValidAfter:     now,
+		ValidBefore:    now + int64(ttl.Seconds()),
+		ResourceURI:    resourceURI,
 	}
 }
 

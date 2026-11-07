@@ -21,7 +21,15 @@ func getSpecsDir(t *testing.T) string {
 	if !ok {
 		t.Fatal("unable to resolve current file path")
 	}
-	return filepath.Join(filepath.Dir(filename), "..", "..", "specs")
+	p1 := filepath.Join(filepath.Dir(filename), "..", "..", "specs")
+	if _, err := os.Stat(p1); err == nil {
+		return p1
+	}
+	p2 := filepath.Join(filepath.Dir(filename), "..", "..", "..", "AgentPay", "specs")
+	if _, err := os.Stat(p2); err == nil {
+		return p2
+	}
+	return p1
 }
 
 // TestCanonicalErrorsIntegrityAgainstTaxonomy validates Go CanonicalErrorRegistry against protocol-errors.json.
@@ -175,8 +183,8 @@ func TestDualPathProtocolTestVectors(t *testing.T) {
 				if challenge.Asset != input.Asset {
 					t.Errorf("expected asset %s, got %s", input.Asset, challenge.Asset)
 				}
-				if challenge.Scheme != "agentpay-wallet" {
-					t.Errorf("expected scheme agentpay-wallet, got %s", challenge.Scheme)
+				if challenge.Scheme != TransferAuthorizationScheme {
+					t.Errorf("expected scheme %s, got %s", TransferAuthorizationScheme, challenge.Scheme)
 				}
 
 			case "TC_PROTO_02_WALLET_APIKEY_SELECTION":

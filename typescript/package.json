@@ -1,6 +1,6 @@
 {
   "name": "agentpay-core-sdk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Universal AI Agent Gateway & FinOps Client SDK for TypeScript / Node.js",
   "license": "Apache-2.0",
   "author": "AgentFinOps & AgentPay Core Team",

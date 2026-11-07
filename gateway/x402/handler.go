@@ -207,6 +207,7 @@ type PaymentProcessor struct {
 	usageService       usage.Service
 	paymentService     payment.Service
 	settlementDefaults SettlementDefaults
+	assetResolver      AssetResolver
 	externalStlMu      sync.RWMutex
 	externalStlIDs     map[string]string
 }
@@ -259,6 +260,8 @@ func (p *PaymentProcessor) SetNonceStore(s NonceStore)                { if s != 
 func (p *PaymentProcessor) GetNonceStore() NonceStore                 { return p.nonceStore }
 func (p *PaymentProcessor) SetSettlementDefaults(d SettlementDefaults) { p.settlementDefaults = d }
 func (p *PaymentProcessor) GetSettlementDefaults() SettlementDefaults { return p.settlementDefaults }
+func (p *PaymentProcessor) SetAssetResolver(r AssetResolver)          { p.assetResolver = r }
+func (p *PaymentProcessor) GetAssetResolver() AssetResolver           { return p.assetResolver }
 func (p *PaymentProcessor) SetUsageService(svc usage.Service)         { if svc != nil { p.usageService = svc } }
 func (p *PaymentProcessor) GetUsageService() usage.Service            { return p.usageService }
 func (p *PaymentProcessor) SetAgentRegistry(reg *agent.Registry)      { if reg != nil { p.agentRegistry = reg } }
@@ -1473,6 +1476,13 @@ func (p *PaymentProcessor) issueOnChainChallenge(
 	}
 	oc := p.resolveOnchain(route)
 	ch := oc.newChallenge(r.URL.Path, 300*time.Second)
+	if route.AllowedPaymentMethods == "both" {
+		if ch.Extensions == nil {
+			ch.Extensions = make(map[string]interface{})
+		}
+		ch.Extensions["allowedPaymentMethods"] = "both"
+		ch.Extensions["walletSupported"] = true
+	}
 	intentID := "pi_" + ch.ChallengeID
 	// Keep Idempotency-Key off the provisional challenged intent so the retry can bind it cleanly.
 	sc.initIntent(route.TenantID, defaultProjectID, "", intentID, "", "onchain", payment.IntentStatusChallenged)

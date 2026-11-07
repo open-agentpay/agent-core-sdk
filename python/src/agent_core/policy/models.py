@@ -321,8 +321,11 @@ class PaymentRequest(BaseModel):
     @field_validator("asset")
     @classmethod
     def _normalise_asset(cls, v: str) -> str:
-        if v in _WALLET_FIAT_CURRENCIES:
-            return v
+        clean = v.strip()
+        if clean.upper() in _WALLET_FIAT_CURRENCIES:
+            return clean.upper()
+        if clean.upper() == "USDC":
+            return clean.upper()
         return _validate_evm_address(v, "asset")
 
     @field_validator("network")
