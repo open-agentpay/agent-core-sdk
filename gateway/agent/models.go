@@ -50,10 +50,11 @@ type AgentPolicyConfig struct {
 
 // PolicyDecision records the outcome of an in-path synchronous policy evaluation.
 type PolicyDecision struct {
-	Allowed    bool   `json:"allowed"`
-	ReasonCode string `json:"reason_code"` // e.g., ALLOW, ERR_AGENT_SUSPENDED, ERR_POLICY_MAX_PER_TX, etc.
-	Reason     string `json:"reason"`
-	RuleID     string `json:"rule_id,omitempty"`
+	Allowed    bool                   `json:"allowed"`
+	ReasonCode string                 `json:"reason_code"` // e.g., ALLOW, ERR_AGENT_SUSPENDED, ERR_POLICY_MAX_PER_TX, etc.
+	Reason     string                 `json:"reason"`
+	RuleID     string                 `json:"rule_id,omitempty"`
+	Extra      map[string]interface{} `json:"extra,omitempty"`
 }
 
 // CorrelationContext captures distributed tracing identifiers for auditing.

@@ -18,8 +18,17 @@ import (
 
 // APIHandler dispatches control plane requests.
 type APIHandler struct {
-	svc    Service
-	jwtMgr *auth.JWTManager
+	svc                 Service
+	jwtMgr              *auth.JWTManager
+	subresourceHandlers map[string]http.Handler
+}
+
+// RegisterSubresource registers an extension HTTP handler for a tenant subresource (e.g. /api/v1/tenants/{id}/<name>).
+func (h *APIHandler) RegisterSubresource(name string, handler http.Handler) {
+	if h.subresourceHandlers == nil {
+		h.subresourceHandlers = make(map[string]http.Handler)
+	}
+	h.subresourceHandlers[name] = handler
 }
 
 // NewHandler creates a new HTTP handler for control plane REST API with a test JWT manager.
@@ -616,6 +625,13 @@ func (h *APIHandler) handleTenantScoped(
 
 	sub := parts[1]
 	rest := parts[2:]
+
+	if h.subresourceHandlers != nil {
+		if subHandler, ok := h.subresourceHandlers[sub]; ok && subHandler != nil {
+			subHandler.ServeHTTP(w, r)
+			return true
+		}
+	}
 
 	switch sub {
 	case "currency":

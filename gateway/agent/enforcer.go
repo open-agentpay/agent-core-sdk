@@ -43,6 +43,14 @@ func NewEnforcer() *Enforcer {
 	}
 }
 
+// EvaluatePolicy satisfies the PolicyEvaluator interface.
+func (e *Enforcer) EvaluatePolicy(ctx context.Context, req *PolicyRequest) PolicyDecision {
+	if req == nil || req.Agent == nil {
+		return PolicyDecision{Allowed: true, ReasonCode: CodeAllow, Reason: "Default allow (empty request)"}
+	}
+	return e.Evaluate(ctx, req.Agent, req.Policy, req.RouteID, req.RoutePath, req.AmountBase)
+}
+
 // Evaluate synchronously checks all Agent-level policies against the current request.
 func (e *Enforcer) Evaluate(
 	ctx context.Context,
@@ -178,3 +186,5 @@ func (e *Enforcer) RecordSpend(agentID string, amountBaseUnits int64) {
 		amount:    amountBaseUnits,
 	})
 }
+
+var _ PolicyEvaluator = (*Enforcer)(nil)

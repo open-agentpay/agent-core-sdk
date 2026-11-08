@@ -59,6 +59,40 @@ type ServerOptions struct {
 	WalletSvc         wallet.Service
 	Transport         http.RoundTripper
 	AssetResolver     x402.AssetResolver
+	PolicyEvaluator    agent.PolicyEvaluator
+	SpendRecorder      agent.SpendRecorder
+	ExtraRoutes        map[string]http.Handler
+	TenantSubresources map[string]http.Handler
+}
+
+// WithTenantSubresource registers an extension handler for tenant-scoped subresources at /api/v1/tenants/{tenant_id}/<name>
+func WithTenantSubresource(subresource string, h http.Handler) Option {
+	return func(o *ServerOptions) {
+		if o.TenantSubresources == nil {
+			o.TenantSubresources = make(map[string]http.Handler)
+		}
+		o.TenantSubresources[subresource] = h
+	}
+}
+
+// WithPolicyEvaluator provides an optional custom PolicyEvaluator implementation.
+func WithPolicyEvaluator(e agent.PolicyEvaluator) Option {
+	return func(o *ServerOptions) { o.PolicyEvaluator = e }
+}
+
+// WithSpendRecorder provides an optional custom SpendRecorder implementation.
+func WithSpendRecorder(r agent.SpendRecorder) Option {
+	return func(o *ServerOptions) { o.SpendRecorder = r }
+}
+
+// WithExtraRoute registers an extra HTTP handler pattern onto the gateway ServeMux.
+func WithExtraRoute(pattern string, h http.Handler) Option {
+	return func(o *ServerOptions) {
+		if o.ExtraRoutes == nil {
+			o.ExtraRoutes = make(map[string]http.Handler)
+		}
+		o.ExtraRoutes[pattern] = h
+	}
 }
 
 // WithPaymentVerifier provides a custom PaymentVerifier implementation.
@@ -241,6 +275,12 @@ func NewWithOptions(
 	if opts.AssetResolver != nil {
 		processor.SetAssetResolver(opts.AssetResolver)
 	}
+	if opts.PolicyEvaluator != nil {
+		processor.SetPolicyEvaluator(opts.PolicyEvaluator)
+	}
+	if opts.SpendRecorder != nil {
+		processor.SetSpendRecorder(opts.SpendRecorder)
+	}
 	if cfg != nil {
 		processor.SetSettlementDefaults(x402.SettlementDefaults{
 			DefaultNetwork:       cfg.Settlement.DefaultNetwork,
@@ -339,6 +379,13 @@ func NewWithOptions(
 		return nil, fmt.Errorf("failed to initialize JWT manager: %w", err)
 	}
 	adminHandler := admin.NewHandlerWithJWT(adminSvc, jwtMgr)
+	if apiH, ok := adminHandler.(*admin.APIHandler); ok {
+		for sub, h := range opts.TenantSubresources {
+			if sub != "" && h != nil {
+				apiH.RegisterSubresource(sub, h)
+			}
+		}
+	}
 	securedAdminHandler := auth.Middleware(jwtMgr)(adminHandler)
 
 	startTime := time.Now()
@@ -365,6 +412,13 @@ func NewWithOptions(
 	mux.Handle("/api/v1/tenants/", securedAdminHandler)
 	mux.Handle("/api/v1/wallets", securedAdminHandler)
 	mux.Handle("/api/v1/wallets/", securedAdminHandler)
+
+	// Register Host/Enterprise Extra Routes (if injected)
+	for pattern, h := range opts.ExtraRoutes {
+		if pattern != "" && h != nil {
+			mux.Handle(pattern, h)
+		}
+	}
 
 	if cfg.Metrics.Enabled {
 		mux.Handle(cfg.Metrics.Path, m.Handler())

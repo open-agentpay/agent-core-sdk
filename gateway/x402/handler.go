@@ -203,6 +203,8 @@ type PaymentProcessor struct {
 	metrics            *metrics.Metrics
 	agentRegistry      *agent.Registry
 	agentEnforcer      *agent.Enforcer
+	policyEvaluator    agent.PolicyEvaluator
+	spendRecorder      agent.SpendRecorder
 	auditEmitter       agent.AuditEmitter
 	usageService       usage.Service
 	paymentService     payment.Service
@@ -268,6 +270,10 @@ func (p *PaymentProcessor) SetAgentRegistry(reg *agent.Registry)      { if reg !
 func (p *PaymentProcessor) GetAgentRegistry() *agent.Registry         { return p.agentRegistry }
 func (p *PaymentProcessor) SetAgentEnforcer(enf *agent.Enforcer)      { if enf != nil { p.agentEnforcer = enf } }
 func (p *PaymentProcessor) GetAgentEnforcer() *agent.Enforcer         { return p.agentEnforcer }
+func (p *PaymentProcessor) SetPolicyEvaluator(e agent.PolicyEvaluator) { p.policyEvaluator = e }
+func (p *PaymentProcessor) GetPolicyEvaluator() agent.PolicyEvaluator { return p.policyEvaluator }
+func (p *PaymentProcessor) SetSpendRecorder(r agent.SpendRecorder)     { p.spendRecorder = r }
+func (p *PaymentProcessor) GetSpendRecorder() agent.SpendRecorder     { return p.spendRecorder }
 func (p *PaymentProcessor) SetAuditEmitter(e agent.AuditEmitter)      { p.auditEmitter = e }
 func (p *PaymentProcessor) GetAuditEmitter() agent.AuditEmitter       { return p.auditEmitter }
 func (p *PaymentProcessor) SetIdempotencyStore(s idempotency.Store)   { if s != nil { p.idempotencyStore = s } }
@@ -952,8 +958,23 @@ func (p *PaymentProcessor) handleWalletPayment(
 		},
 	}
 
-	// 2. Synchronous In-Path Agent Policy Enforcement (T2.9)
-	decision := p.agentEnforcer.Evaluate(r.Context(), resolvedAgent, agentPolicy, route.RouteID, r.URL.Path, route.PriceBaseUnits)
+	// 2. Synchronous In-Path Agent Policy Enforcement
+	var decision agent.PolicyDecision
+	if p.policyEvaluator != nil {
+		decision = p.policyEvaluator.EvaluatePolicy(r.Context(), &agent.PolicyRequest{
+			Agent:      resolvedAgent,
+			Policy:     agentPolicy,
+			RouteID:    route.RouteID,
+			RoutePath:  r.URL.Path,
+			AmountBase: route.PriceBaseUnits,
+			Currency:   route.Asset,
+			Declared:   &declared,
+		})
+	} else if p.agentEnforcer != nil {
+		decision = p.agentEnforcer.Evaluate(r.Context(), resolvedAgent, agentPolicy, route.RouteID, r.URL.Path, route.PriceBaseUnits)
+	} else {
+		decision = agent.PolicyDecision{Allowed: true, ReasonCode: agent.CodeAllow}
+	}
 	if p.auditEmitter != nil && resolvedAgent.AgentID != "" {
 		p.auditEmitter.Emit(agent.BuildPolicyDecisionEvent(
 			resolvedAgent,
@@ -970,12 +991,16 @@ func (p *PaymentProcessor) handleWalletPayment(
 		p.metrics.IncPaymentsFailed()
 		sc.initIntent(resolvedAgent.TenantID, resolvedAgent.ProjectID, resolvedAgent.AgentID, intentID, idemKey, "wallet", payment.IntentStatusRejected)
 		sc.recordReq(resolvedAgent.TenantID, resolvedAgent.ProjectID, wallet.APIKeyID, resolvedAgent.AgentID, intentID, http.StatusForbidden, decision.ReasonCode, false)
-		WriteProtocolError(w, decision.ReasonCode, sc.requestID, map[string]interface{}{
+		respData := map[string]interface{}{
 			"agent_id":    resolvedAgent.AgentID,
 			"reason":      decision.Reason,
 			"reason_code": decision.ReasonCode,
 			"rule_id":     decision.RuleID,
-		})
+		}
+		for k, v := range decision.Extra {
+			respData[k] = v
+		}
+		WriteProtocolError(w, decision.ReasonCode, sc.requestID, respData)
 		return
 	}
 
@@ -1061,7 +1086,21 @@ func (p *PaymentProcessor) settleIdempotentWalletOutcome(
 			p.markWalletFundsRecovery(ctx, tenantID, wfc.idemKey, resp.StatusCode, "wallet capture failed")
 			return
 		}
-		p.agentEnforcer.RecordSpend(wfc.resolvedAgent.AgentID, route.PriceBaseUnits)
+		if p.agentEnforcer != nil {
+			p.agentEnforcer.RecordSpend(wfc.resolvedAgent.AgentID, route.PriceBaseUnits)
+		}
+		if p.spendRecorder != nil {
+			_ = p.spendRecorder.RecordSpend(ctx, &agent.SpendRecord{
+				TenantID:   wfc.wallet.TenantID,
+				ProjectID:  wfc.resolvedAgent.ProjectID,
+				AgentID:    wfc.resolvedAgent.AgentID,
+				RouteID:    route.RouteID,
+				AmountBase: route.PriceBaseUnits,
+				Currency:   route.Asset,
+				HoldID:     holdID,
+				CapturedAt: time.Now().Unix(),
+			})
+		}
 		wfc.emitSpendAudit(holdID, "capture")
 		p.metrics.IncHoldsCaptured()
 		p.metrics.IncPaymentsVerified()
@@ -1177,7 +1216,21 @@ func (p *PaymentProcessor) handleNonIdempotentWalletPayment(
 			}
 			return
 		}
-		p.agentEnforcer.RecordSpend(wfc.resolvedAgent.AgentID, route.PriceBaseUnits)
+		if p.agentEnforcer != nil {
+			p.agentEnforcer.RecordSpend(wfc.resolvedAgent.AgentID, route.PriceBaseUnits)
+		}
+		if p.spendRecorder != nil {
+			_ = p.spendRecorder.RecordSpend(ctx, &agent.SpendRecord{
+				TenantID:   wfc.wallet.TenantID,
+				ProjectID:  wfc.resolvedAgent.ProjectID,
+				AgentID:    wfc.resolvedAgent.AgentID,
+				RouteID:    route.RouteID,
+				AmountBase: route.PriceBaseUnits,
+				Currency:   route.Asset,
+				HoldID:     holdID,
+				CapturedAt: time.Now().Unix(),
+			})
+		}
 		wfc.emitSpendAudit(holdID, "capture")
 		p.metrics.IncHoldsCaptured()
 		p.metrics.IncPaymentsVerified()
