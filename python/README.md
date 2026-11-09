@@ -219,6 +219,44 @@ func main() {
 
 ---
 
+## 🔌 Model Context Protocol (MCP) Pricing & Guardrails
+
+Use `agent_core.integrations.mcp` to annotate MCP tools with pricing metadata and protect agents from runaway spending:
+
+```python
+from agent_core.integrations.mcp import (
+    mcp_price,
+    InMemoryToolQuotaGuard,
+    McpToolInterceptor,
+    McpPriceMetadata,
+)
+
+# 1. Server-side Tool Pricing
+@mcp_price(amount=0.05, currency="CNY", vendor="fin-data")
+def query_market_depth(symbol: str) -> dict:
+    return {"symbol": symbol, "price": 1850.0}
+
+# 2. Client-side Financial Firewall
+guard = InMemoryToolQuotaGuard(max_per_call_cny=1.00, rolling_budget_cny=10.00)
+interceptor = McpToolInterceptor(
+    guard=guard,
+    pricing_registry={"query_market_depth": McpPriceMetadata(amount_cny=0.05, currency="CNY")},
+    handle_violation=True,  # Returns isError: True to LLM on budget breach
+)
+
+# 3. Safe Tool Call with Pre-Call Hold & Post-Call Capture
+result = interceptor.call_tool(
+    tool_name="query_market_depth",
+    arguments={"symbol": "600519"},
+    execute_fn=query_market_depth,
+)
+print(result)
+```
+
+👉 **Full Guide**: [MCP Financial Governance & Tool Pricing Guide](../docs/mcp-integration-guide.md)
+
+---
+
 ## Conformance & Quality Standards
 
 - **100% Deterministic Verification**: Passes all cross-language test vectors for mathematical budget calculations, sliding time windows, and state transitions.

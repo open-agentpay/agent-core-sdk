@@ -229,6 +229,19 @@ func main() {
 
 ---
 
+## 🔌 Model Context Protocol (MCP) Financial Governance
+
+`agent-core-sdk` natively supports Anthropic's **Model Context Protocol (MCP)** across both Python and TypeScript, injecting deterministic pricing metadata onto tools and stopping runaway agent spending before requests leave the client:
+
+- **Server-Side Pricing**: Use `@mcp_price(amount=0.05, currency="CNY")` (Python) or `withPrice(tool, { amount: 0.05, currency: 'CNY' })` (TypeScript) to declare tool pricing in MCP `tools/list` schema extensions.
+- **Client-Side Pre-Call Firewall**: Wrap any MCP client with `McpToolInterceptor` to evaluate single-call caps and rolling budgets before `tools/call` executes.
+- **Fail-Safe Semantic Error Return**: Blocks over-budget calls before execution and returns `{ isError: true, content: [...] }` so the LLM gracefully explains the limit to users instead of crashing.
+- **Zero Financial Loss on Crashes**: Two-phase Hold-and-Capture model automatically releases held budget if upstream tools time out.
+
+👉 **Read the Full Documentation**: [MCP Financial Governance & Tool Pricing Guide](docs/mcp-integration-guide.md)
+
+---
+
 ## Conformance & Quality Standards
 
 - **100% Deterministic Verification**: Passes all cross-language test vectors for mathematical budget calculations, sliding time windows, and state transitions.

@@ -219,6 +219,51 @@ func main() {
 
 ---
 
+## 🔌 Model Context Protocol (MCP) Pricing & Guardrails
+
+Use `agentpay-core-sdk/integrations` to monetize MCP tools and safeguard client-side agent calls:
+
+```typescript
+import {
+  withPrice,
+  InMemoryToolQuotaGuard,
+  McpToolInterceptor,
+  McpPriceMetadata,
+} from 'agentpay-core-sdk/integrations';
+
+// 1. Server-side Tool Pricing Annotation
+export const marketTool = withPrice({
+  name: 'query_market_depth',
+  description: 'Query Level 2 quotes',
+  execute: async ({ symbol }: { symbol: string }) => ({ symbol, price: 1850.0 }),
+}, {
+  amount: 0.05,
+  currency: 'CNY',
+});
+
+// 2. Client-side Pre-Call Financial Guard
+const guard = new InMemoryToolQuotaGuard({ maxPerCallCny: 1.00, rollingBudgetCny: 10.00 });
+const interceptor = new McpToolInterceptor({
+  guard,
+  pricingRegistry: {
+    query_market_depth: new McpPriceMetadata({ amountCny: 0.05, currency: 'CNY' }),
+  },
+  handleViolation: true,
+});
+
+// 3. Intercepted Tool Calling with Hold/Capture
+const result = await interceptor.callTool(
+  { toolName: marketTool.name, arguments: { symbol: '600519' } },
+  marketTool.execute,
+  marketTool
+);
+console.log(result);
+```
+
+👉 **Full Guide**: [MCP Financial Governance & Tool Pricing Guide](../docs/mcp-integration-guide.md)
+
+---
+
 ## Conformance & Quality Standards
 
 - **100% Deterministic Verification**: Passes all cross-language test vectors for mathematical budget calculations, sliding time windows, and state transitions.
