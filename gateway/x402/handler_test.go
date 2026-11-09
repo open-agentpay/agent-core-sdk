@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -697,6 +698,81 @@ func TestP04CaseVariantPayerReplayAndRestartPersistence(t *testing.T) {
 	processor2.HandleRequest(w3, req3, route, "req_p04_3")
 	if w3.Code != http.StatusConflict {
 		t.Fatalf("expected 409 Conflict on post-restart nonce replay, got %d", w3.Code)
+	}
+}
+
+func TestGuestTrialKeyInterception(t *testing.T) {
+	walletSvc := NewMemoryWalletService()
+	walletSvc.RegisterWallet("apk_live_guest_tester99", &WalletAccount{
+		WalletID:         "wlt_public_sandbox",
+		TenantID:         "ten_public_sandbox",
+		Status:           "active",
+		AvailableBalance: 1000000000,
+		HeldBalance:      0,
+	})
+
+	processor, _ := setupTestProcessor(walletSvc, nil, nil)
+
+	// 1. High price route (¥50 = 50,000,000 base units > ¥0.50 cap) must be 403 rejected
+	expensiveRoute := &rcu.RouteConfig{
+		RouteID:               "rou_expensive",
+		UpstreamURL:           "http://upstream.internal:8000",
+		PriceBaseUnits:        50000000,
+		Asset:                 "CNY",
+		AllowedPaymentMethods: "wallet",
+	}
+
+	req1 := httptest.NewRequest("GET", "/v1/expensive", nil)
+	req1.Header.Set("Authorization", "Bearer apk_live_guest_tester99")
+	w1 := httptest.NewRecorder()
+	processor.HandleRequest(w1, req1, expensiveRoute, "req_exp_1")
+
+	if w1.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for guest key calling ¥50 route, got %d", w1.Code)
+	}
+	if !strings.Contains(w1.Body.String(), "ERR_TRIAL_SINGLE_TX_CAP_EXCEEDED") {
+		t.Fatalf("expected ERR_TRIAL_SINGLE_TX_CAP_EXCEEDED error code, got %s", w1.Body.String())
+	}
+
+	// 2. Trial-disabled route must be 403 rejected
+	trialDisabled := false
+	disabledRoute := &rcu.RouteConfig{
+		RouteID:               "rou_no_trial",
+		UpstreamURL:           "http://upstream.internal:8000",
+		PriceBaseUnits:        100000, // ¥0.10 <= ¥0.50
+		Asset:                 "CNY",
+		AllowedPaymentMethods: "wallet",
+		IsTrialAllowed:        &trialDisabled,
+	}
+
+	req2 := httptest.NewRequest("GET", "/v1/no-trial", nil)
+	req2.Header.Set("Authorization", "Bearer apk_live_guest_tester99")
+	w2 := httptest.NewRecorder()
+	processor.HandleRequest(w2, req2, disabledRoute, "req_notrial_2")
+
+	if w2.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for guest key calling trial-disabled route, got %d", w2.Code)
+	}
+	if !strings.Contains(w2.Body.String(), "ERR_TRIAL_NOT_ALLOWED") {
+		t.Fatalf("expected ERR_TRIAL_NOT_ALLOWED error code, got %s", w2.Body.String())
+	}
+
+	// 3. Eligible route (¥0.20 = 200,000 base units <= ¥0.50) must proceed to challenge (402)
+	eligibleRoute := &rcu.RouteConfig{
+		RouteID:               "rou_eligible",
+		UpstreamURL:           "http://upstream.internal:8000",
+		PriceBaseUnits:        200000,
+		Asset:                 "CNY",
+		AllowedPaymentMethods: "wallet",
+	}
+
+	req3 := httptest.NewRequest("GET", "/v1/eligible", nil)
+	req3.Header.Set("Authorization", "Bearer apk_live_guest_tester99")
+	w3 := httptest.NewRecorder()
+	processor.HandleRequest(w3, req3, eligibleRoute, "req_ok_3")
+
+	if w3.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected 402 challenge for eligible route, got %d", w3.Code)
 	}
 }
 

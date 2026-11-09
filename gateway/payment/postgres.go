@@ -531,7 +531,11 @@ func (p *PostgresService) GetPaymentAudit(ctx context.Context, tenantID, intentI
 		return nil, err
 	}
 	if tenantID != "" && rec.TenantID != tenantID {
-		return nil, ErrTenantMismatch
+		var routeOwnerTenant string
+		_ = p.db.QueryRowContext(ctx, "SELECT tenant_id FROM ap_route WHERE route_id = $1", rec.RouteID).Scan(&routeOwnerTenant)
+		if routeOwnerTenant != tenantID {
+			return nil, ErrTenantMismatch
+		}
 	}
 	return rec, nil
 }
@@ -571,7 +575,11 @@ func (p *PostgresService) GetPaymentAuditByRequestID(ctx context.Context, tenant
 		return nil, err
 	}
 	if tenantID != "" && rec.TenantID != tenantID {
-		return nil, ErrTenantMismatch
+		var routeOwnerTenant string
+		_ = p.db.QueryRowContext(ctx, "SELECT tenant_id FROM ap_route WHERE route_id = $1", rec.RouteID).Scan(&routeOwnerTenant)
+		if routeOwnerTenant != tenantID {
+			return nil, ErrTenantMismatch
+		}
 	}
 	return rec, nil
 }
@@ -582,12 +590,12 @@ func (p *PostgresService) ListPaymentAudits(ctx context.Context, filter PaymentA
 	argIdx := 1
 
 	if filter.TenantID != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("i.tenant_id = $%d", argIdx))
+		whereClauses = append(whereClauses, fmt.Sprintf("(i.tenant_id = $%d OR i.route_id IN (SELECT route_id FROM ap_route WHERE tenant_id = $%d))", argIdx, argIdx))
 		args = append(args, filter.TenantID)
 		argIdx++
 	}
 	if filter.ProjectID != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("i.project_id = $%d", argIdx))
+		whereClauses = append(whereClauses, fmt.Sprintf("(i.project_id = $%d OR i.route_id IN (SELECT route_id FROM ap_route WHERE project_id = $%d))", argIdx, argIdx))
 		args = append(args, filter.ProjectID)
 		argIdx++
 	}

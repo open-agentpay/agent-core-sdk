@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
 	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 )
 
@@ -79,14 +80,20 @@ type ToolCallResult struct {
 
 // Handler handles MCP SSE connections and JSON-RPC dispatching.
 type Handler struct {
-	rcuMgr    SnapshotReader
-	metrics   *metrics.Metrics
-	evaluator agent.PolicyEvaluator
-	recorder  agent.SpendRecorder
-	transport http.RoundTripper
+	rcuMgr         SnapshotReader
+	metrics        *metrics.Metrics
+	evaluator      agent.PolicyEvaluator
+	recorder       agent.SpendRecorder
+	paymentService payment.Service
+	transport      http.RoundTripper
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*sessionInfo
+}
+
+// SetPaymentService injects optional payment persistence service for audit correlation.
+func (h *Handler) SetPaymentService(svc payment.Service) {
+	h.paymentService = svc
 }
 
 type sessionInfo struct {
@@ -410,23 +417,42 @@ func (h *Handler) handleToolsCall(
 		}
 	}
 
-	// 3.1 Trial Key Safeguard: restrict guest trial key to routes <= ¥0.50 (500,000 base units)
-	if strings.HasPrefix(apiKey, "apk_live_guest_") && costUnits > 500000 {
-		resp := JSONRPCResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Result: ToolCallResult{
-				IsError: true,
-				Content: []ToolCallContentItem{
-					{
-						Type: "text",
-						Text: fmt.Sprintf("【AgentFinOps 体验限制】工具 [%s] 属于高价值商业接口 (¥%s/次)。免注册试用 Key 单笔最高支持 ¥0.50，请访问 https://console.aipmedia.cn 获取正式企业 Key 并充值体验。", params.Name, costCny),
+	// 3.1 Trial Key Safeguard: restrict guest trial key to routes <= ¥0.50 (500,000 base units) and trial allowed
+	if strings.HasPrefix(apiKey, "apk_live_guest_") {
+		if !targetRoute.TrialAllowed() {
+			resp := JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: ToolCallResult{
+					IsError: true,
+					Content: []ToolCallContentItem{
+						{
+							Type: "text",
+							Text: fmt.Sprintf("【AgentFinOps 试用限制】工具 [%s] 已关闭免密试用体验，请访问 https://console.aipmedia.cn 获取正式企业 Key。", params.Name),
+						},
 					},
 				},
-			},
+			}
+			h.writeJSON(w, http.StatusOK, resp)
+			return
 		}
-		h.writeJSON(w, http.StatusOK, resp)
-		return
+		if costUnits > 500000 {
+			resp := JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: ToolCallResult{
+					IsError: true,
+					Content: []ToolCallContentItem{
+						{
+							Type: "text",
+							Text: fmt.Sprintf("【AgentFinOps 体验限制】工具 [%s] 属于高价值商业接口 (¥%s/次)。免注册试用 Key 单笔最高支持 ¥0.50，请访问 https://console.aipmedia.cn 获取正式企业 Key 并充值体验。", params.Name, costCny),
+						},
+					},
+				},
+			}
+			h.writeJSON(w, http.StatusOK, resp)
+			return
+		}
 	}
 
 	// 4. Safe Upstream Execution (Zero financial loss on error)
@@ -525,6 +551,38 @@ func (h *Handler) handleToolsCall(
 			},
 		})
 	}
+	if h.paymentService != nil {
+		intentID := "pi_mcp_" + holdID
+		reqID := fmt.Sprintf("req_mcp_%d", time.Now().UnixNano())
+		asset := targetRoute.Asset
+		if asset == "" {
+			asset = "CNY"
+		}
+		verID := snapshot.VersionID
+		if verID == "" {
+			verID = "ver_1"
+		}
+		pID := projectID
+		if pID == "" {
+			pID = "prj_default"
+		}
+		intent := &payment.PaymentIntent{
+			IntentID:        intentID,
+			TenantID:        tenantID,
+			ProjectID:       pID,
+			AgentID:         agentID,
+			RouteID:         targetRoute.RouteID,
+			RequestID:       reqID,
+			PaymentMethod:   "wallet",
+			AmountBaseUnits: costUnits,
+			Asset:           asset,
+			Status:          payment.IntentStatusCompleted,
+			ConfigVersionID: verID,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+		}
+		_ = h.paymentService.CreateIntent(r.Context(), intent)
+	}
 
 	resp := JSONRPCResponse{
 		JSONRPC: "2.0",
@@ -568,7 +626,16 @@ func extractAPIKey(r *http.Request) string {
 	if k := r.Header.Get("X-AgentPay-Key"); k != "" {
 		return strings.TrimSpace(k)
 	}
+	if k := r.Header.Get("X-API-Key"); k != "" {
+		return strings.TrimSpace(k)
+	}
 	if k := r.URL.Query().Get("apiKey"); k != "" {
+		return strings.TrimSpace(k)
+	}
+	if k := r.URL.Query().Get("key"); k != "" {
+		return strings.TrimSpace(k)
+	}
+	if k := r.URL.Query().Get("api_key"); k != "" {
 		return strings.TrimSpace(k)
 	}
 	return ""

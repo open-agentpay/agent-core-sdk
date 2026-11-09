@@ -888,6 +888,31 @@ func (p *PaymentProcessor) handleWalletPayment(
 		return
 	}
 
+	// Trial Key Safeguards: restrict guest trial key (apk_live_guest_) to routes <= ¥0.50 (500,000 base units)
+	if strings.HasPrefix(apiKey, "apk_live_guest_") {
+		if !route.TrialAllowed() {
+			sc.recordReq(wallet.TenantID, defaultProjectID, wallet.APIKeyID, "", "", http.StatusForbidden, "ERR_TRIAL_NOT_ALLOWED", false)
+			WriteProtocolError(w, "ERR_TRIAL_NOT_ALLOWED", sc.requestID, map[string]interface{}{
+				"route_id": route.RouteID,
+				"message":  "【AgentFinOps 试用限制】该接口已关闭免密试用体验，请登录控制台获取正式企业 Key。",
+			})
+			return
+		}
+		if route.PriceBaseUnits > 500000 {
+			costCny := fmt.Sprintf("%.2f", float64(route.PriceBaseUnits)/1000000.0)
+			sc.recordReq(wallet.TenantID, defaultProjectID, wallet.APIKeyID, "", "", http.StatusForbidden, "ERR_TRIAL_SINGLE_TX_CAP_EXCEEDED", false)
+			WriteProtocolError(w, "ERR_TRIAL_SINGLE_TX_CAP_EXCEEDED", sc.requestID, map[string]interface{}{
+				"route_id":                route.RouteID,
+				"price_base_units":        route.PriceBaseUnits,
+				"price_cny":               costCny,
+				"max_single_tx_base_unit": 500000,
+				"max_single_tx_cny":       "0.50",
+				"message":                 fmt.Sprintf("【AgentFinOps 试用限制】该接口单次调用费用 (¥%s) 超出免密试用 Key 单笔上限 (¥0.50)，请访问 https://console.aipmedia.cn 获取正式企业 Key 并充值体验。", costCny),
+			})
+			return
+		}
+	}
+
 	// API-key wallet requests first receive a price challenge. Only the SDK's
 	// approved wallet authorization may claim it and proceed to a Hold.
 	// SECURITY-REVIEW: challenge claim is durable and one-time before any money-moving operation.

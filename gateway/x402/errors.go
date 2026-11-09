@@ -32,6 +32,8 @@ const (
 	ErrCodeAgentRevoked               = "ERR_AGENT_REVOKED"
 	ErrCodeRouteNotAllowed            = "ERR_ROUTE_NOT_ALLOWED"
 	ErrCodeRateLimitExceeded          = "ERR_RATE_LIMIT_EXCEEDED"
+	ErrCodeTrialSingleTxCapExceeded   = "ERR_TRIAL_SINGLE_TX_CAP_EXCEEDED"
+	ErrCodeTrialNotAllowed            = "ERR_TRIAL_NOT_ALLOWED"
 
 	// Backward compatibility aliases
 	ErrCodeNonceAlreadyUsed   = ErrCodeNonceReplay
@@ -118,6 +120,20 @@ var CanonicalErrorRegistry = map[string]ErrorDescriptor{
 		Domain:     "TENANT",
 		Message:    "Tenant organization account is suspended.",
 		Actionable: "Contact platform super-admin to reinstate tenant account.",
+	},
+	ErrCodeTrialSingleTxCapExceeded: {
+		Code:       ErrCodeTrialSingleTxCapExceeded,
+		Status:     http.StatusForbidden,
+		Domain:     "TRIAL",
+		Message:    "Guest trial API Key single transaction ceiling exceeded (max ¥0.50).",
+		Actionable: "Upgrade to enterprise API Key in console for full quota.",
+	},
+	ErrCodeTrialNotAllowed: {
+		Code:       ErrCodeTrialNotAllowed,
+		Status:     http.StatusForbidden,
+		Domain:     "TRIAL",
+		Message:    "This route does not permit anonymous guest trial access.",
+		Actionable: "Obtain an official API Key from the console.",
 	},
 	ErrCodeSignatureInvalid: {
 		Code:       ErrCodeSignatureInvalid,

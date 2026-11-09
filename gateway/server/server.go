@@ -428,6 +428,9 @@ func NewWithOptions(
 
 	// Register Standard MCP (Model Context Protocol) Transparent Proxy Endpoints
 	mcpHandler := mcp.NewHandler(rcuMgr, m, opts.PolicyEvaluator, opts.SpendRecorder, opts.Transport)
+	if paymentSvc != nil {
+		mcpHandler.SetPaymentService(paymentSvc)
+	}
 	mux.Handle("/v1/mcp/sse", mcpHandler)
 	mux.Handle("/v1/mcp/messages", mcpHandler)
 	mux.Handle("/v1/mcp/messages/", mcpHandler)

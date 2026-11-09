@@ -2523,6 +2523,7 @@ func (p *PostgresService) SyncRCU(ctx context.Context) error {
 		SELECT r.route_id, r.tenant_id, r.project_id, r.path_pattern, r.upstream_url,
 		       r.price_base_units, r.asset, r.onchain_price_base_units, r.onchain_asset, r.payee_address, r.allowed_payment_methods,
 		       r.timeout_ms, r.rate_limit_rpm, r.status,
+		       COALESCE(r.is_trial_allowed, TRUE),
 		       c.type, c.params, c.secret_enc, c.key_version
 		FROM ap_route r
 		LEFT JOIN api_auth_configs c ON c.api_id = r.route_id
@@ -2538,6 +2539,7 @@ func (p *PostgresService) SyncRCU(ctx context.Context) error {
 		var r rcu.RouteConfig
 		var onchainPrice sql.NullInt64
 		var onchainAsset sql.NullString
+		var isTrialAllowed sql.NullBool
 		var cType sql.NullString
 		var cParamsBytes, cSecretEnc []byte
 		var cKeyVersion sql.NullInt64
@@ -2546,9 +2548,14 @@ func (p *PostgresService) SyncRCU(ctx context.Context) error {
 			&r.RouteID, &r.TenantID, &r.ProjectID, &r.PathPattern, &r.UpstreamURL,
 			&r.PriceBaseUnits, &r.Asset, &onchainPrice, &onchainAsset, &r.PayeeAddress, &r.AllowedPaymentMethods,
 			&r.TimeoutMS, &r.RateLimitRPM, &r.Status,
+			&isTrialAllowed,
 			&cType, &cParamsBytes, &cSecretEnc, &cKeyVersion,
 		); err != nil {
 			return fmt.Errorf("failed to scan active route: %w", err)
+		}
+		if isTrialAllowed.Valid {
+			b := isTrialAllowed.Bool
+			r.IsTrialAllowed = &b
 		}
 		if onchainPrice.Valid {
 			v := onchainPrice.Int64

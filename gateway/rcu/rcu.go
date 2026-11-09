@@ -60,13 +60,29 @@ type RouteConfig struct {
 	UpstreamHeadersSnake  map[string]string `json:"upstream_headers,omitempty"`
 	MaxBodyBytes          int64                            `json:"maxBodyBytes,omitempty"`
 	MaxBodyBytesSnake     int64                            `json:"max_body_bytes,omitempty"`
+	IsTrialAllowed        *bool                            `json:"isTrialAllowed,omitempty"`
+	IsTrialAllowedSnake   *bool                            `json:"is_trial_allowed,omitempty"`
 	UpstreamAuth          *upstreamauth.UpstreamAuthConfig `json:"upstreamAuth,omitempty"`
 	UpstreamAuthSnake     *upstreamauth.UpstreamAuthConfig `json:"upstream_auth,omitempty"`
 	UpstreamSecrets       map[string]string                `json:"-"`
 }
 
+// TrialAllowed returns whether the route allows trial guest keys.
+func (r *RouteConfig) TrialAllowed() bool {
+	if r.IsTrialAllowed != nil {
+		return *r.IsTrialAllowed
+	}
+	if r.IsTrialAllowedSnake != nil {
+		return *r.IsTrialAllowedSnake
+	}
+	return true
+}
+
 // Normalize populates canonical fields from snake_case aliases if provided.
 func (r *RouteConfig) Normalize() {
+	if r.IsTrialAllowed == nil && r.IsTrialAllowedSnake != nil {
+		r.IsTrialAllowed = r.IsTrialAllowedSnake
+	}
 	if r.RouteID == "" && r.RouteIDSnake != "" {
 		r.RouteID = r.RouteIDSnake
 	}
