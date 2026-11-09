@@ -329,13 +329,13 @@ func TestP01UnauthenticatedSpoofedAndCrossTenantIsolation(t *testing.T) {
 
 	// Setup Tenant A and Tenant B
 	tenA, ownerA, _ := svc.CreateTenant(ctx, "Tenant Alpha", "ten_alpha", "owner@alpha.io")
-	prjA, _ := svc.CreateProject(ctx, tenA.TenantID, "Alpha Project", 1000000, "prj_alpha", ownerA.MemberID)
+	prjA, _ := svc.CreateProject(ctx, tenA.TenantID, "Alpha Project", nil, 1000000, "prj_alpha", ownerA.MemberID)
 	agA, _ := svc.CreateAgent(ctx, tenA.TenantID, prjA.ProjectID, "AlphaBot", nil, ownerA.MemberID)
 	wltA, _ := svc.GetWallet(ctx, tenA.TenantID)
 	viewerA, _ := svc.AddMember(ctx, tenA.TenantID, "viewer@alpha.io", RoleViewer, ownerA.MemberID)
 
 	tenB, ownerB, _ := svc.CreateTenant(ctx, "Tenant Beta", "ten_beta", "owner@beta.io")
-	prjB, _ := svc.CreateProject(ctx, tenB.TenantID, "Beta Project", 1000000, "prj_beta", ownerB.MemberID)
+	prjB, _ := svc.CreateProject(ctx, tenB.TenantID, "Beta Project", nil, 1000000, "prj_beta", ownerB.MemberID)
 	agB, _ := svc.CreateAgent(ctx, tenB.TenantID, prjB.ProjectID, "BetaBot", nil, ownerB.MemberID)
 	wltB, _ := svc.GetWallet(ctx, tenB.TenantID)
 

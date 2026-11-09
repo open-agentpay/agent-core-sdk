@@ -37,10 +37,10 @@ type Service interface {
 	UpdateTenantStatus(ctx context.Context, tenantID string, status TenantStatus, actorMemberID string) (*Tenant, error)
 
 	// Project
-	CreateProject(ctx context.Context, tenantID, name string, budgetCap int64, projectID string, actorMemberID string) (*Project, error)
+	CreateProject(ctx context.Context, tenantID, name string, departmentID *string, budgetCap int64, projectID string, actorMemberID string) (*Project, error)
 	GetProject(ctx context.Context, tenantID, projectID string) (*Project, error)
 	ListProjects(ctx context.Context, tenantID string) ([]*Project, error)
-	UpdateProject(ctx context.Context, tenantID, projectID string, name string, budgetCap *int64, status *ProjectStatus, actorMemberID string) (*Project, error)
+	UpdateProject(ctx context.Context, tenantID, projectID string, name string, departmentID *string, budgetCap *int64, status *ProjectStatus, actorMemberID string) (*Project, error)
 	DeleteProject(ctx context.Context, tenantID, projectID string, actorMemberID string) error
 
 	// Member
@@ -596,7 +596,7 @@ func (s *MemoryService) UpdateTenantStatus(ctx context.Context, tenantID string,
 // Projects
 // ----------------------------------------------------------------------------
 
-func (s *MemoryService) CreateProject(ctx context.Context, tenantID, name string, budgetCap int64, projectID string, actorMemberID string) (*Project, error) {
+func (s *MemoryService) CreateProject(ctx context.Context, tenantID, name string, departmentID *string, budgetCap int64, projectID string, actorMemberID string) (*Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -629,10 +629,17 @@ func (s *MemoryService) CreateProject(ctx context.Context, tenantID, name string
 		pid = GenerateProjectID()
 	}
 
+	var deptIDToSet *string
+	if departmentID != nil && strings.TrimSpace(*departmentID) != "" {
+		d := strings.TrimSpace(*departmentID)
+		deptIDToSet = &d
+	}
+
 	now := time.Now().Unix()
 	p := &Project{
 		ProjectID:          pid,
 		TenantID:           tenantID,
+		DepartmentID:       deptIDToSet,
 		Name:               cleanName,
 		BudgetCapBaseUnits: budgetCap,
 		Status:             ProjectStatusActive,
@@ -672,7 +679,7 @@ func (s *MemoryService) ListProjects(ctx context.Context, tenantID string) ([]*P
 	return res, nil
 }
 
-func (s *MemoryService) UpdateProject(ctx context.Context, tenantID, projectID string, name string, budgetCap *int64, status *ProjectStatus, actorMemberID string) (*Project, error) {
+func (s *MemoryService) UpdateProject(ctx context.Context, tenantID, projectID string, name string, departmentID *string, budgetCap *int64, status *ProjectStatus, actorMemberID string) (*Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -687,7 +694,7 @@ func (s *MemoryService) UpdateProject(ctx context.Context, tenantID, projectID s
 		return nil, err
 	}
 
-	before := map[string]interface{}{"name": p.Name, "budget_cap": p.BudgetCapBaseUnits, "status": string(p.Status)}
+	before := map[string]interface{}{"name": p.Name, "budget_cap": p.BudgetCapBaseUnits, "status": string(p.Status), "department_id": p.DepartmentID}
 	if name != "" {
 		cleanName := strings.TrimSpace(name)
 		for _, other := range s.projects {
@@ -697,6 +704,14 @@ func (s *MemoryService) UpdateProject(ctx context.Context, tenantID, projectID s
 		}
 		p.Name = cleanName
 	}
+	if departmentID != nil {
+		if *departmentID == "" {
+			p.DepartmentID = nil
+		} else {
+			cleanDept := strings.TrimSpace(*departmentID)
+			p.DepartmentID = &cleanDept
+		}
+	}
 	if budgetCap != nil {
 		p.BudgetCapBaseUnits = *budgetCap
 	}
@@ -705,7 +720,7 @@ func (s *MemoryService) UpdateProject(ctx context.Context, tenantID, projectID s
 	}
 	p.UpdatedAt = time.Now().Unix()
 
-	s.recordAudit(tenantID, actorMemberID, "project.updated", "Project", projectID, before, map[string]interface{}{"name": p.Name, "status": string(p.Status)}, "127.0.0.1")
+	s.recordAudit(tenantID, actorMemberID, "project.updated", "Project", projectID, before, map[string]interface{}{"name": p.Name, "status": string(p.Status), "department_id": p.DepartmentID}, "127.0.0.1")
 	return p, nil
 }
 

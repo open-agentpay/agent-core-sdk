@@ -26,7 +26,7 @@ func setupRouteTest(t *testing.T) (*MemoryService, http.Handler, *auth.JWTManage
 	}
 
 	// Create project
-	prj, err := svc.CreateProject(ctx, tenant.TenantID, "LLM Services", 1000000, "", owner.MemberID)
+	prj, err := svc.CreateProject(ctx, tenant.TenantID, "LLM Services", nil, 1000000, "", owner.MemberID)
 	if err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}

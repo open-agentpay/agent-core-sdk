@@ -160,7 +160,7 @@ func TestServerHealthReadyAndVersionEndpoints(t *testing.T) {
 		t.Errorf("expected 200 for authenticated /api/v1/tenants, got %d", wAdminAuth.Code)
 	}
 
-	proj, err := adminSvc.CreateProject(reqAdmin.Context(), tenant.TenantID, "AI漫剧项目", 10000000, "", owner.MemberID)
+	proj, err := adminSvc.CreateProject(reqAdmin.Context(), tenant.TenantID, "AI漫剧项目", nil, 10000000, "", owner.MemberID)
 	if err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}

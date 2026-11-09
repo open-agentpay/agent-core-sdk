@@ -141,6 +141,7 @@ func NormalizeCurrency(c string) (string, error) {
 type Project struct {
 	ProjectID          string        `json:"project_id"`
 	TenantID           string        `json:"tenant_id"`
+	DepartmentID       *string       `json:"department_id"`
 	Name               string        `json:"name"`
 	BudgetCapBaseUnits int64         `json:"budget_cap_base_units"`
 	Status             ProjectStatus `json:"status"`

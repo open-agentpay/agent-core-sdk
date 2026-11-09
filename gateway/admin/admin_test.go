@@ -41,13 +41,13 @@ func TestTenantAndProjectLifecycle(t *testing.T) {
 	}
 
 	// Empty actorMemberID must be rejected
-	_, err = svc.CreateProject(ctx, tenant.TenantID, "Unauthorized Project", 50000000, "prj_unauth", "")
+	_, err = svc.CreateProject(ctx, tenant.TenantID, "Unauthorized Project", nil, 50000000, "prj_unauth", "")
 	if err != ErrPermissionDenied {
 		t.Fatalf("expected ErrPermissionDenied for empty actorMemberID, got %v", err)
 	}
 
 	// 2. Create Project
-	proj, err := svc.CreateProject(ctx, tenant.TenantID, "Project X", 50000000, "prj_x", owner.MemberID)
+	proj, err := svc.CreateProject(ctx, tenant.TenantID, "Project X", nil, 50000000, "prj_x", owner.MemberID)
 	if err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
@@ -56,14 +56,14 @@ func TestTenantAndProjectLifecycle(t *testing.T) {
 	}
 
 	// Duplicate project in same tenant rejected
-	_, err = svc.CreateProject(ctx, tenant.TenantID, "Project X", 0, "", owner.MemberID)
+	_, err = svc.CreateProject(ctx, tenant.TenantID, "Project X", nil, 0, "", owner.MemberID)
 	if err != ErrProjectAlreadyExists {
 		t.Fatalf("expected ErrProjectAlreadyExists, got %v", err)
 	}
 
 	// 3. Update & Delete Project
 	newCap := int64(100000000)
-	updatedProj, err := svc.UpdateProject(ctx, tenant.TenantID, proj.ProjectID, "Project X Renamed", &newCap, nil, owner.MemberID)
+	updatedProj, err := svc.UpdateProject(ctx, tenant.TenantID, proj.ProjectID, "Project X Renamed", nil, &newCap, nil, owner.MemberID)
 	if err != nil {
 		t.Fatalf("failed to update project: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestAgentLifecycleAndKillSwitchFastPath(t *testing.T) {
 	svc, reg, _ := setupTestService()
 
 	tenant, owner, _ := svc.CreateTenant(ctx, "Agent Corp", "ten_agent", "owner@agent.com")
-	proj, _ := svc.CreateProject(ctx, tenant.TenantID, "Bot Project", 0, "prj_bot", owner.MemberID)
+	proj, _ := svc.CreateProject(ctx, tenant.TenantID, "Bot Project", nil, 0, "prj_bot", owner.MemberID)
 
 	// 1. Create Agent
 	ag, err := svc.CreateAgent(ctx, tenant.TenantID, proj.ProjectID, "TradingBot", map[string]interface{}{

@@ -630,7 +630,7 @@ func (p *PostgresService) UpdateTenantStatus(ctx context.Context, tenantID strin
 // Projects
 // ----------------------------------------------------------------------------
 
-func (p *PostgresService) CreateProject(ctx context.Context, tenantID, name string, budgetCap int64, projectID string, actorMemberID string) (*Project, error) {
+func (p *PostgresService) CreateProject(ctx context.Context, tenantID, name string, departmentID *string, budgetCap int64, projectID string, actorMemberID string) (*Project, error) {
 	t, err := p.GetTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
@@ -663,35 +663,42 @@ func (p *PostgresService) CreateProject(ctx context.Context, tenantID, name stri
 
 	now := time.Now()
 	nowUnix := now.Unix()
+	var deptIDToInsert *string
+	if departmentID != nil && strings.TrimSpace(*departmentID) != "" {
+		d := strings.TrimSpace(*departmentID)
+		deptIDToInsert = &d
+	}
+
 	if _, err := p.db.ExecContext(ctx, `
-		INSERT INTO ap_project (project_id, tenant_id, name, budget_cap_base_units, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 'active', $5, $5);
-	`, pid, tenantID, cleanName, budgetCap, now); err != nil {
+		INSERT INTO ap_project (project_id, tenant_id, department_id, name, budget_cap_base_units, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'active', $6, $6);
+	`, pid, tenantID, deptIDToInsert, cleanName, budgetCap, now); err != nil {
 		return nil, err
 	}
 
 	prj := &Project{
 		ProjectID:          pid,
 		TenantID:           tenantID,
+		DepartmentID:       deptIDToInsert,
 		Name:               cleanName,
 		BudgetCapBaseUnits: budgetCap,
 		Status:             ProjectStatusActive,
 		CreatedAt:          nowUnix,
 		UpdatedAt:          nowUnix,
 	}
-	p.recordAudit(ctx, tenantID, actorMemberID, "project.created", "Project", pid, nil, map[string]interface{}{"name": cleanName}, "127.0.0.1")
+	p.recordAudit(ctx, tenantID, actorMemberID, "project.created", "Project", pid, nil, map[string]interface{}{"name": cleanName, "department_id": deptIDToInsert}, "127.0.0.1")
 	return prj, nil
 }
 
 func (p *PostgresService) GetProject(ctx context.Context, tenantID, projectID string) (*Project, error) {
 	var prj Project
 	err := p.db.QueryRowContext(ctx, `
-		SELECT project_id, tenant_id, name, budget_cap_base_units, status,
+		SELECT project_id, tenant_id, department_id, name, budget_cap_base_units, status,
 		       EXTRACT(EPOCH FROM created_at)::bigint, EXTRACT(EPOCH FROM updated_at)::bigint
 		FROM ap_project
 		WHERE project_id = $1;
 	`, projectID).Scan(
-		&prj.ProjectID, &prj.TenantID, &prj.Name, &prj.BudgetCapBaseUnits, &prj.Status, &prj.CreatedAt, &prj.UpdatedAt,
+		&prj.ProjectID, &prj.TenantID, &prj.DepartmentID, &prj.Name, &prj.BudgetCapBaseUnits, &prj.Status, &prj.CreatedAt, &prj.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrProjectNotFound
@@ -707,7 +714,7 @@ func (p *PostgresService) GetProject(ctx context.Context, tenantID, projectID st
 
 func (p *PostgresService) ListProjects(ctx context.Context, tenantID string) ([]*Project, error) {
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT project_id, tenant_id, name, budget_cap_base_units, status,
+		SELECT project_id, tenant_id, department_id, name, budget_cap_base_units, status,
 		       EXTRACT(EPOCH FROM created_at)::bigint, EXTRACT(EPOCH FROM updated_at)::bigint
 		FROM ap_project
 		WHERE tenant_id = $1
@@ -721,7 +728,7 @@ func (p *PostgresService) ListProjects(ctx context.Context, tenantID string) ([]
 	projects := make([]*Project, 0)
 	for rows.Next() {
 		var prj Project
-		if err := rows.Scan(&prj.ProjectID, &prj.TenantID, &prj.Name, &prj.BudgetCapBaseUnits, &prj.Status, &prj.CreatedAt, &prj.UpdatedAt); err != nil {
+		if err := rows.Scan(&prj.ProjectID, &prj.TenantID, &prj.DepartmentID, &prj.Name, &prj.BudgetCapBaseUnits, &prj.Status, &prj.CreatedAt, &prj.UpdatedAt); err != nil {
 			return nil, err
 		}
 		projects = append(projects, &prj)
@@ -729,7 +736,7 @@ func (p *PostgresService) ListProjects(ctx context.Context, tenantID string) ([]
 	return projects, nil
 }
 
-func (p *PostgresService) UpdateProject(ctx context.Context, tenantID, projectID string, name string, budgetCap *int64, status *ProjectStatus, actorMemberID string) (*Project, error) {
+func (p *PostgresService) UpdateProject(ctx context.Context, tenantID, projectID string, name string, departmentID *string, budgetCap *int64, status *ProjectStatus, actorMemberID string) (*Project, error) {
 	if err := p.enforcePermission(ctx, actorMemberID, tenantID, PermissionProjectUpdate); err != nil {
 		return nil, err
 	}
@@ -739,7 +746,7 @@ func (p *PostgresService) UpdateProject(ctx context.Context, tenantID, projectID
 		return nil, err
 	}
 
-	before := map[string]interface{}{"name": prj.Name, "budget_cap": prj.BudgetCapBaseUnits, "status": string(prj.Status)}
+	before := map[string]interface{}{"name": prj.Name, "budget_cap": prj.BudgetCapBaseUnits, "status": string(prj.Status), "department_id": prj.DepartmentID}
 	if name != "" {
 		cleanName := strings.TrimSpace(name)
 		var exists bool
@@ -748,6 +755,14 @@ func (p *PostgresService) UpdateProject(ctx context.Context, tenantID, projectID
 			return nil, ErrProjectAlreadyExists
 		}
 		prj.Name = cleanName
+	}
+	if departmentID != nil {
+		if *departmentID == "" {
+			prj.DepartmentID = nil
+		} else {
+			cleanDept := strings.TrimSpace(*departmentID)
+			prj.DepartmentID = &cleanDept
+		}
 	}
 	if budgetCap != nil {
 		prj.BudgetCapBaseUnits = *budgetCap
@@ -758,14 +773,14 @@ func (p *PostgresService) UpdateProject(ctx context.Context, tenantID, projectID
 
 	if _, err := p.db.ExecContext(ctx, `
 		UPDATE ap_project
-		SET name = $1, budget_cap_base_units = $2, status = $3, updated_at = NOW()
-		WHERE project_id = $4;
-	`, prj.Name, prj.BudgetCapBaseUnits, string(prj.Status), projectID); err != nil {
+		SET name = $1, department_id = $2, budget_cap_base_units = $3, status = $4, updated_at = NOW()
+		WHERE project_id = $5;
+	`, prj.Name, prj.DepartmentID, prj.BudgetCapBaseUnits, string(prj.Status), projectID); err != nil {
 		return nil, err
 	}
 
 	prj.UpdatedAt = time.Now().Unix()
-	p.recordAudit(ctx, tenantID, actorMemberID, "project.updated", "Project", projectID, before, map[string]interface{}{"name": prj.Name, "status": string(prj.Status)}, "127.0.0.1")
+	p.recordAudit(ctx, tenantID, actorMemberID, "project.updated", "Project", projectID, before, map[string]interface{}{"name": prj.Name, "status": string(prj.Status), "department_id": prj.DepartmentID}, "127.0.0.1")
 	return prj, nil
 }
 

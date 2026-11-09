@@ -53,7 +53,7 @@ func TestConfigPublishingAndRollback(t *testing.T) {
 	viewerToken, _ := jwtMgr.GenerateToken(viewer.MemberID, viewer.Email, tenantID, string(viewer.Role))
 
 	// 2. Create Project and a valid Route & Policy
-	proj, err := svc.CreateProject(ctx, tenantID, "AI Engine", 1000000, "", ownerID)
+	proj, err := svc.CreateProject(ctx, tenantID, "AI Engine", nil, 1000000, "", ownerID)
 	if err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}

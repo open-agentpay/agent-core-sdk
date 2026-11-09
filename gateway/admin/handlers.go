@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -694,12 +695,18 @@ func (h *APIHandler) handleTenantProjects(w http.ResponseWriter, r *http.Request
 		switch method {
 		case http.MethodPost:
 			var body struct {
-				Name               string `json:"name"`
-				BudgetCapBaseUnits int64  `json:"budget_cap_base_units"`
-				ProjectID          string `json:"project_id"`
+				Name               string  `json:"name"`
+				DepartmentID       *string `json:"department_id"`
+				BudgetCapBaseUnits int64   `json:"budget_cap_base_units"`
+				ProjectID          string  `json:"project_id"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			p, err := h.svc.CreateProject(r.Context(), tenantID, body.Name, body.BudgetCapBaseUnits, body.ProjectID, actorMemberID)
+			var deptIDToSet *string
+			if body.DepartmentID != nil && strings.TrimSpace(*body.DepartmentID) != "" {
+				d := strings.TrimSpace(*body.DepartmentID)
+				deptIDToSet = &d
+			}
+			p, err := h.svc.CreateProject(r.Context(), tenantID, body.Name, deptIDToSet, body.BudgetCapBaseUnits, body.ProjectID, actorMemberID)
 			if err != nil {
 				h.handleError(w, err)
 				return true
@@ -740,13 +747,29 @@ func (h *APIHandler) handleTenantProjects(w http.ResponseWriter, r *http.Request
 			return true
 
 		case http.MethodPatch:
+			bodyBytes, _ := io.ReadAll(r.Body)
+			var raw map[string]json.RawMessage
+			_ = json.Unmarshal(bodyBytes, &raw)
+
 			var body struct {
 				Name               string         `json:"name"`
+				DepartmentID       *string        `json:"department_id"`
 				BudgetCapBaseUnits *int64         `json:"budget_cap_base_units"`
 				Status             *ProjectStatus `json:"status"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			p, err := h.svc.UpdateProject(r.Context(), tenantID, projectID, body.Name, body.BudgetCapBaseUnits, body.Status, actorMemberID)
+			_ = json.Unmarshal(bodyBytes, &body)
+
+			var deptToUpdate *string
+			if _, specified := raw["department_id"]; specified {
+				if body.DepartmentID == nil || strings.TrimSpace(*body.DepartmentID) == "" {
+					empty := ""
+					deptToUpdate = &empty
+				} else {
+					clean := strings.TrimSpace(*body.DepartmentID)
+					deptToUpdate = &clean
+				}
+			}
+			p, err := h.svc.UpdateProject(r.Context(), tenantID, projectID, body.Name, deptToUpdate, body.BudgetCapBaseUnits, body.Status, actorMemberID)
 			if err != nil {
 				h.handleError(w, err)
 				return true

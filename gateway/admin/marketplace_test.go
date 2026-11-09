@@ -22,7 +22,7 @@ func TestPublicMarketplaceEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tenant: %v", err)
 	}
-	prj, err := svc.CreateProject(ctx, ten.TenantID, "Marketplace Feeds", 500000000, "prj_mkt_01", owner.MemberID)
+	prj, err := svc.CreateProject(ctx, ten.TenantID, "Marketplace Feeds", nil, 500000000, "prj_mkt_01", owner.MemberID)
 	if err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
