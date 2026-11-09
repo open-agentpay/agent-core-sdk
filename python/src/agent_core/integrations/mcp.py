@@ -219,3 +219,117 @@ def inject_tool_schema_pricing(
     enriched = dict(schema)
     enriched["_agentpay"] = pricing.to_dict()
     return enriched
+
+
+class McpToolInterceptor:
+    """
+    Client-side interceptor for MCP tool calls.
+
+    Extracts tool pricing metadata before execution, verifies quota against a
+    ToolQuotaGuard, blocks excessive spend before invocation, and safely manages
+    Hold-and-Capture settlement.
+    """
+
+    def __init__(
+        self,
+        guard: ToolQuotaGuard,
+        pricing_registry: Optional[Dict[str, McpPriceMetadata]] = None,
+        default_cost_cny: float = 0.0,
+        handle_violation: bool = True,
+    ) -> None:
+        self.guard = guard
+        self.pricing_registry = pricing_registry or {}
+        self.default_cost_cny = default_cost_cny
+        self.handle_violation = handle_violation
+
+    def resolve_pricing(
+        self, tool_name: str, execute_fn: Optional[Callable] = None
+    ) -> McpPriceMetadata:
+        """Resolves tool price from registry, decorated function, or default."""
+        if tool_name in self.pricing_registry:
+            return self.pricing_registry[tool_name]
+        if execute_fn is not None:
+            meta = get_tool_price_metadata(execute_fn)
+            if meta is not None:
+                return meta
+        return McpPriceMetadata(amount_cny=self.default_cost_cny)
+
+    def call_tool(
+        self,
+        tool_name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        execute_fn: Optional[Callable] = None,
+        agent_id: str = "default_agent",
+    ) -> Dict[str, Any]:
+        """
+        Executes an MCP tool call with pre-call quota evaluation and post-call settlement.
+        """
+        pricing = self.resolve_pricing(tool_name, execute_fn)
+        ctx = ToolCallContext(
+            agent_id=agent_id,
+            tool_name=tool_name,
+            amount_cny=pricing.amount_cny,
+            currency=pricing.currency,
+            arguments=arguments,
+        )
+
+        # 1. Pre-call policy evaluation & reservation
+        try:
+            hold_id = self.guard.reserve(ctx)
+        except PolicyViolationError as err:
+            if self.handle_violation:
+                return {
+                    "isError": True,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"AgentPay Financial Firewall Intercepted: [{err.code.value}] "
+                                f"{err.detail}. Upstream tool '{tool_name}' was NOT executed."
+                            ),
+                        }
+                    ],
+                    "_agentpay": {
+                        "action": "BLOCKED",
+                        "reason": err.code.value,
+                        "amount_cny": pricing.amount_cny,
+                    },
+                }
+            raise
+
+        # 2. Execution phase with exception safeguard
+        try:
+            if execute_fn is not None:
+                try:
+                    raw_res = execute_fn(tool_name, arguments or {})
+                except TypeError:
+                    raw_res = execute_fn(**(arguments or {}))
+            else:
+                raw_res = {}
+
+            # 3. Post-call commit (Capture)
+            self.guard.commit(hold_id, actual_cost_cny=pricing.amount_cny)
+
+            if isinstance(raw_res, dict) and "content" in raw_res:
+                res = dict(raw_res)
+            else:
+                import json
+                text_val = (
+                    raw_res
+                    if isinstance(raw_res, str)
+                    else json.dumps(raw_res, ensure_ascii=False)
+                )
+                res = {"content": [{"type": "text", "text": text_val}]}
+
+            res["_agentpay"] = {
+                "status": "SETTLED",
+                "hold_id": hold_id,
+                "cost_cny": pricing.amount_cny,
+            }
+            return res
+
+        except Exception as exc:
+            # 4. On execution error: Release hold safely without financial loss
+            self.guard.release(hold_id, reason=str(exc))
+            raise
+

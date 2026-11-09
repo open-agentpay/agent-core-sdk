@@ -310,3 +310,130 @@ export function injectToolSchemaPricing<T extends Record<string, unknown>>(
     _agentpay: pricing.toJSON(),
   };
 }
+
+export interface McpToolInterceptorOptions {
+  guard: ToolQuotaGuard;
+  pricingRegistry?: Record<string, McpPriceMetadata>;
+  defaultCostCny?: number;
+  handleViolation?: boolean;
+}
+
+export class McpToolInterceptor {
+  private readonly guard: ToolQuotaGuard;
+  private readonly pricingRegistry: Record<string, McpPriceMetadata>;
+  private readonly defaultCostCny: number;
+  private readonly handleViolation: boolean;
+
+  constructor(options: McpToolInterceptorOptions) {
+    this.guard = options.guard;
+    this.pricingRegistry = options.pricingRegistry ?? {};
+    this.defaultCostCny = options.defaultCostCny ?? 0.0;
+    this.handleViolation = options.handleViolation ?? true;
+  }
+
+  resolvePricing(toolName: string, toolObj?: unknown): McpPriceMetadata {
+    if (this.pricingRegistry[toolName]) {
+      return this.pricingRegistry[toolName];
+    }
+    if (toolObj) {
+      const meta = getToolPrice(toolObj);
+      if (meta) return meta;
+    }
+    return new McpPriceMetadata({ amountCny: this.defaultCostCny });
+  }
+
+  async callTool<TResult = unknown>(
+    call: {
+      toolName: string;
+      arguments?: Record<string, unknown>;
+      agentId?: string;
+    },
+    executeFn?: (name: string, args: Record<string, unknown>) => Promise<TResult> | TResult,
+    toolObj?: unknown,
+  ): Promise<McpToolResponse | TResult> {
+    const pricing = this.resolvePricing(call.toolName, toolObj);
+    const ctx: ToolCallContext = {
+      agentId: call.agentId ?? 'default_agent',
+      toolName: call.toolName,
+      amountCny: pricing.amountCny,
+      currency: pricing.currency,
+      arguments: call.arguments,
+    };
+
+    // 1. Pre-call reservation
+    let holdId: string;
+    try {
+      holdId = await this.guard.reserve(ctx);
+    } catch (err: unknown) {
+      if (this.handleViolation && err instanceof PolicyViolationError) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: `AgentPay Financial Firewall Intercepted: [${err.code}] ${err.detail || err.message}. Upstream tool '${call.toolName}' was NOT executed.`,
+            },
+          ],
+          _agentpay: {
+            action: 'BLOCKED',
+            reason: err.code,
+            amount_cny: pricing.amountCny,
+          },
+        } as McpToolResponse;
+      }
+      throw err;
+    }
+
+    // 2. Execution phase with safety release
+    try {
+      let rawRes: any = {};
+      if (executeFn) {
+        try {
+          rawRes = await executeFn(call.toolName, call.arguments ?? {});
+        } catch (callErr: any) {
+          if (callErr instanceof TypeError && (executeFn as any).length === 1) {
+            rawRes = await (executeFn as any)(call.arguments ?? {});
+          } else {
+            throw callErr;
+          }
+        }
+      }
+
+      // 3. Post-call commit (Capture)
+      await this.guard.commit(holdId, pricing.amountCny);
+
+      if (
+        rawRes &&
+        typeof rawRes === 'object' &&
+        'content' in rawRes &&
+        Array.isArray(rawRes.content)
+      ) {
+        return {
+          ...rawRes,
+          _agentpay: {
+            status: 'SETTLED',
+            hold_id: holdId,
+            cost_cny: pricing.amountCny,
+          },
+        };
+      }
+
+      const textVal = typeof rawRes === 'string' ? rawRes : JSON.stringify(rawRes);
+      return {
+        content: [{ type: 'text', text: textVal }],
+        _agentpay: {
+          status: 'SETTLED',
+          hold_id: holdId,
+          cost_cny: pricing.amountCny,
+        },
+      } as McpToolResponse;
+    } catch (execErr) {
+      // 4. On execution failure: release hold without loss
+      await this.guard.release(
+        holdId,
+        execErr instanceof Error ? execErr.message : String(execErr),
+      );
+      throw execErr;
+    }
+  }
+}
