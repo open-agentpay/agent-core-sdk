@@ -59,7 +59,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run"
+    "test": "npm run build && node --test tests/*.test.ts"
   },
   "keywords": [
     "ai-agent",

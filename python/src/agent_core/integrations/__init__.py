@@ -7,4 +7,6 @@ Provides first-class tool wrappers and middleware for major AI Agent frameworks:
 
 from __future__ import annotations
 
-__all__ = ["langchain"]
+from . import langchain, mcp
+
+__all__ = ["langchain", "mcp"]
