@@ -486,6 +486,9 @@ func (s *GatewayServer) runBackgroundReconciliation() {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			_, _ = s.processor.ReconcileSettlements(ctx)
 			_, _ = s.processor.SweepExpiredHolds(ctx, now)
+			if s.adminSvc != nil {
+				_, _ = s.adminSvc.CleanExpiredTrialKeys(ctx)
+			}
 			cancel()
 		}
 	}

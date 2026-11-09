@@ -78,6 +78,7 @@ type Service interface {
 	GetMarketplaceRouteBySlug(ctx context.Context, slug string) (*MarketplaceRouteItem, error)
 	CreateTrialAPIKey(ctx context.Context, clientIP, fingerprint string) (*TrialKeyResponse, error)
 	ClaimTrialAPIKey(ctx context.Context, tenantID string, rawAPIKey string, projectID, agentID string, actorMemberID string) (*APIKey, error)
+	CleanExpiredTrialKeys(ctx context.Context) (int64, error)
 
 	// Policies
 	CreatePolicy(ctx context.Context, pol *Policy, actorMemberID string) (*Policy, error)

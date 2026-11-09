@@ -220,6 +220,22 @@ func (s *MemoryService) ClaimTrialAPIKey(ctx context.Context, tenantID string, r
 	return matched, nil
 }
 
+// CleanExpiredTrialKeys cleans up expired unclaimed guest trial keys in memory.
+func (s *MemoryService) CleanExpiredTrialKeys(ctx context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().Unix()
+	var count int64
+	for id, k := range s.apiKeys {
+		if k.TenantID == PublicSandboxTenantID && k.ExpiresAt != nil && *k.ExpiresAt < now-3600 {
+			delete(s.apiKeys, id)
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (p *PostgresService) CreateTrialAPIKey(ctx context.Context, clientIP, fingerprint string) (*TrialKeyResponse, error) {
 	cleanIP := strings.TrimSpace(clientIP)
 	if cleanIP == "" {
@@ -384,6 +400,28 @@ func (p *PostgresService) ClaimTrialAPIKey(ctx context.Context, tenantID string,
 		p.agentReg.BindAPIKeyHash(hashHex, targetAgent)
 	}
 
+	// Migrate historical requests, intents, and usage events from sandbox to the enterprise tenant
+	_, _ = p.db.ExecContext(ctx, `
+		UPDATE ap_request_record
+		SET tenant_id = $1, project_id = $2, agent_id = $3
+		WHERE api_key_id = $4
+	`, tenantID, targetProj, targetAgent, updated.KeyID)
+
+	_, _ = p.db.ExecContext(ctx, `
+		UPDATE ap_payment_intent
+		SET tenant_id = $1, project_id = $2, agent_id = $3
+		WHERE request_id IN (SELECT request_id FROM ap_request_record WHERE api_key_id = $4)
+	`, tenantID, targetProj, targetAgent, updated.KeyID)
+
+	_, _ = p.db.ExecContext(ctx, `
+		UPDATE ap_usage_event
+		SET tenant_id = $1, project_id = $2, agent_id = $3
+		WHERE intent_id IN (
+			SELECT intent_id FROM ap_request_record 
+			WHERE api_key_id = $4 AND intent_id IS NOT NULL
+		)
+	`, tenantID, targetProj, targetAgent, updated.KeyID)
+
 	p.recordAudit(ctx, tenantID, actorMemberID, "api_key.claimed_trial", "APIKey", updated.KeyID,
 		map[string]interface{}{"from_tenant": existingTenantID},
 		map[string]interface{}{"to_tenant": tenantID, "project_id": targetProj, "agent_id": targetAgent},
@@ -391,6 +429,20 @@ func (p *PostgresService) ClaimTrialAPIKey(ctx context.Context, tenantID string,
 	)
 
 	return &updated, nil
+}
+
+// CleanExpiredTrialKeys purges unclaimed guest trial keys in Postgres whose expires_at is past 1 hour.
+func (p *PostgresService) CleanExpiredTrialKeys(ctx context.Context) (int64, error) {
+	res, err := p.db.ExecContext(ctx, `
+		DELETE FROM ap_api_key
+		WHERE tenant_id = 'ten_public_sandbox'
+		  AND expires_at IS NOT NULL
+		  AND expires_at < NOW() - INTERVAL '1 hour'
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 var slugSanitizeRegex = regexp.MustCompile(`[^a-z0-9\-]+`)
