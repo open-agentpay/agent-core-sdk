@@ -152,7 +152,7 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := generateSessionID()
-	routeID := r.URL.Query().Get("route_id")
+	routeID := extractRouteIdentifier(r)
 	apiKey := extractAPIKey(r)
 
 	h.sessionsMu.Lock()
@@ -202,7 +202,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	routeID := r.URL.Query().Get("route_id")
+	routeID := extractRouteIdentifier(r)
 	sessionID := r.URL.Query().Get("sessionId")
 	apiKey := extractAPIKey(r)
 	if apiKey == "" && sessionID != "" {
@@ -253,12 +253,12 @@ func (h *Handler) handleToolsList(w http.ResponseWriter, req JSONRPCRequest, fil
 	var tools []ToolDefinition
 
 	for _, route := range snapshot.Routes {
+		if !matchRoute(&route, filterRouteID) {
+			continue
+		}
 		rID := route.RouteID
 		if rID == "" {
 			rID = route.RouteIDSnake
-		}
-		if filterRouteID != "" && rID != filterRouteID && route.PathPattern != filterRouteID {
-			continue
 		}
 
 		priceUnits := route.PriceBaseUnits
@@ -323,7 +323,7 @@ func (h *Handler) handleToolsCall(
 		if rID == "" {
 			rID = rt.RouteIDSnake
 		}
-		if sanitizeToolName(rID) == params.Name || rID == params.Name || (defaultRouteID != "" && (rID == defaultRouteID || rt.PathPattern == defaultRouteID)) {
+		if matchRoute(rt, params.Name) || (defaultRouteID != "" && matchRoute(rt, defaultRouteID)) {
 			targetRoute = rt
 			break
 		}
@@ -574,4 +574,35 @@ func generateHoldID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return "hld_" + hex.EncodeToString(b)
+}
+
+func extractRouteIdentifier(r *http.Request) string {
+	if val := r.URL.Query().Get("route_id"); val != "" {
+		return strings.TrimSpace(val)
+	}
+	if val := r.URL.Query().Get("route"); val != "" {
+		return strings.TrimSpace(val)
+	}
+	if val := r.URL.Query().Get("slug"); val != "" {
+		return strings.TrimSpace(val)
+	}
+	return ""
+}
+
+func matchRoute(route *rcu.RouteConfig, identifier string) bool {
+	if identifier == "" {
+		return true
+	}
+	cleanID := strings.TrimSpace(identifier)
+	rID := route.RouteID
+	if rID == "" {
+		rID = route.RouteIDSnake
+	}
+	if rID == cleanID || sanitizeToolName(rID) == sanitizeToolName(cleanID) {
+		return true
+	}
+	if route.PathPattern == cleanID || strings.TrimPrefix(route.PathPattern, "/") == strings.TrimPrefix(cleanID, "/") {
+		return true
+	}
+	return false
 }
