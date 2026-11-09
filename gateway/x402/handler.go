@@ -888,8 +888,8 @@ func (p *PaymentProcessor) handleWalletPayment(
 		return
 	}
 
-	// Trial Key Safeguards: restrict guest trial key (apk_live_guest_) to routes <= ¥0.50 (500,000 base units)
-	if strings.HasPrefix(apiKey, "apk_live_guest_") {
+	// Trial Key Safeguards: only restrict guest trial key (apk_live_guest_) if still in public sandbox tenant
+	if strings.HasPrefix(apiKey, "apk_live_guest_") && (wallet.TenantID == "ten_public_sandbox" || wallet.TenantID == "") {
 		if !route.TrialAllowed() {
 			sc.recordReq(wallet.TenantID, defaultProjectID, wallet.APIKeyID, "", "", http.StatusForbidden, "ERR_TRIAL_NOT_ALLOWED", false)
 			WriteProtocolError(w, "ERR_TRIAL_NOT_ALLOWED", sc.requestID, map[string]interface{}{

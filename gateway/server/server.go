@@ -431,6 +431,9 @@ func NewWithOptions(
 	if paymentSvc != nil {
 		mcpHandler.SetPaymentService(paymentSvc)
 	}
+	if walletSvc != nil {
+		mcpHandler.SetWalletService(walletSvc)
+	}
 	mux.Handle("/v1/mcp/sse", mcpHandler)
 	mux.Handle("/v1/mcp/messages", mcpHandler)
 	mux.Handle("/v1/mcp/messages/", mcpHandler)

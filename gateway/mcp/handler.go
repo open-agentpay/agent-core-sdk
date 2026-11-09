@@ -21,6 +21,7 @@ import (
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
 	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
 // SnapshotReader abstracts retrieval of current configuration snapshot.
@@ -85,6 +86,7 @@ type Handler struct {
 	evaluator      agent.PolicyEvaluator
 	recorder       agent.SpendRecorder
 	paymentService payment.Service
+	walletService  wallet.Service
 	transport      http.RoundTripper
 
 	sessionsMu sync.RWMutex
@@ -94,6 +96,11 @@ type Handler struct {
 // SetPaymentService injects optional payment persistence service for audit correlation.
 func (h *Handler) SetPaymentService(svc payment.Service) {
 	h.paymentService = svc
+}
+
+// SetWalletService injects optional wallet resolution service.
+func (h *Handler) SetWalletService(svc wallet.Service) {
+	h.walletService = svc
 }
 
 type sessionInfo struct {
@@ -372,6 +379,23 @@ func (h *Handler) handleToolsCall(
 		projectID = targetRoute.ProjectIDSnake
 	}
 
+	isSandboxGuest := strings.HasPrefix(apiKey, "apk_live_guest_")
+
+	if h.walletService != nil && apiKey != "" {
+		if wAcc, err := h.walletService.GetWalletByAPIKey(r.Context(), apiKey); err == nil && wAcc != nil {
+			tenantID = wAcc.TenantID
+			if wAcc.ProjectID != "" {
+				projectID = wAcc.ProjectID
+			}
+			if wAcc.AgentID != "" {
+				agentID = wAcc.AgentID
+			}
+			if wAcc.TenantID != "ten_public_sandbox" && wAcc.TenantID != "" {
+				isSandboxGuest = false
+			}
+		}
+	}
+
 	costUnits := targetRoute.PriceBaseUnits
 	costCny := fmt.Sprintf("%.2f", float64(costUnits)/1000000.0)
 
@@ -417,8 +441,8 @@ func (h *Handler) handleToolsCall(
 		}
 	}
 
-	// 3.1 Trial Key Safeguard: restrict guest trial key to routes <= ¥0.50 (500,000 base units) and trial allowed
-	if strings.HasPrefix(apiKey, "apk_live_guest_") {
+	// 3.1 Trial Key Safeguard: only restrict guest trial keys still in public sandbox
+	if isSandboxGuest {
 		if !targetRoute.TrialAllowed() {
 			resp := JSONRPCResponse{
 				JSONRPC: "2.0",

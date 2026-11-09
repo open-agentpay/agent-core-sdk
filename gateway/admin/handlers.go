@@ -685,6 +685,29 @@ func (h *APIHandler) handleTenantScoped(
 		return h.handleTenantUsages(w, r, tenantID, actorMemberID, rest)
 	case "payments":
 		return h.handleTenantPayments(w, r, tenantID, actorMemberID, rest)
+	case "claim-trial-key":
+		if method == http.MethodPost && len(rest) == 0 {
+			var body struct {
+				APIKey    string `json:"api_key"`
+				ProjectID string `json:"project_id"`
+				AgentID   string `json:"agent_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				h.writeError(w, http.StatusBadRequest, "ERR_INVALID_PARAM", "malformed JSON body")
+				return true
+			}
+			key, err := h.svc.ClaimTrialAPIKey(r.Context(), tenantID, body.APIKey, body.ProjectID, body.AgentID, actorMemberID)
+			if err != nil {
+				h.writeError(w, http.StatusBadRequest, "ERR_CLAIM_FAILED", err.Error())
+				return true
+			}
+			h.writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success": true,
+				"message": "试用 Key 认领转正成功！已绑定为当前企业长效正式密钥，无需更改 Cursor / WorkBuddy 配置即可直接运行。",
+				"api_key": key,
+			})
+			return true
+		}
 	}
 	return false
 }
@@ -950,6 +973,29 @@ func (h *APIHandler) handleTenantAPIKeys(w http.ResponseWriter, r *http.Request,
 			return true
 		}
 		return false
+	}
+
+	if len(rest) == 1 && rest[0] == "claim-trial" && method == http.MethodPost {
+		var body struct {
+			APIKey    string `json:"api_key"`
+			ProjectID string `json:"project_id"`
+			AgentID   string `json:"agent_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			h.writeError(w, http.StatusBadRequest, "ERR_INVALID_PARAM", "malformed JSON body")
+			return true
+		}
+		key, err := h.svc.ClaimTrialAPIKey(r.Context(), tenantID, body.APIKey, body.ProjectID, body.AgentID, actorMemberID)
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, "ERR_CLAIM_FAILED", err.Error())
+			return true
+		}
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "试用 Key 认领转正成功！已绑定为当前企业长效正式密钥，无需更改 Cursor / WorkBuddy 配置即可直接运行。",
+			"api_key": key,
+		})
+		return true
 	}
 
 	if len(rest) == 2 && method == http.MethodPost {

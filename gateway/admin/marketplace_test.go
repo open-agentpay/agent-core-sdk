@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
 func TestPublicMarketplaceEndpoints(t *testing.T) {
@@ -352,5 +353,85 @@ func TestTrialAPIKeyEndpoint(t *testing.T) {
 
 	if recDiff.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK for different IP, got %d: %s", recDiff.Code, recDiff.Body.String())
+	}
+}
+
+func TestClaimTrialAPIKey(t *testing.T) {
+	ctx := context.Background()
+	wlt := wallet.NewMemoryService()
+	svc := NewMemoryService(nil, wlt)
+
+	// 1. Create Enterprise Tenant and Project
+	entTenant, entOwner, err := svc.CreateTenant(ctx, "Enterprise Corp", "ten_enterprise_99", "admin@enterprise.io", "CNY")
+	if err != nil {
+		t.Fatalf("failed to create tenant: %v", err)
+	}
+	entProj, err := svc.CreateProject(ctx, entTenant.TenantID, "Production Core", nil, 500000000, "prj_prod_01", entOwner.MemberID)
+	if err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+	wlt.RegisterWallet(&wallet.Wallet{
+		WalletID:       "wlt_enterprise_99",
+		TenantID:       entTenant.TenantID,
+		Asset:          "CNY",
+		AvailableCache: 1000000000,
+		Status:         wallet.StatusActive,
+	})
+
+	// 2. Generate Trial Key
+	trialResp, err := svc.CreateTrialAPIKey(ctx, "10.0.0.88", "fp_claim_test")
+	if err != nil {
+		t.Fatalf("failed to create trial key: %v", err)
+	}
+	rawKey := trialResp.APIKey
+	if !strings.HasPrefix(rawKey, "apk_live_guest_") {
+		t.Fatalf("expected trial key prefix apk_live_guest_, got %s", rawKey)
+	}
+
+	// Verify initial sandbox binding
+	wAccBefore, err := wlt.GetWalletByAPIKey(ctx, rawKey)
+	if err != nil {
+		t.Fatalf("failed to get wallet before claim: %v", err)
+	}
+	if wAccBefore.TenantID != PublicSandboxTenantID {
+		t.Fatalf("expected initial tenant %s, got %s", PublicSandboxTenantID, wAccBefore.TenantID)
+	}
+
+	// 3. Claim the trial key to the enterprise tenant
+	claimedKey, err := svc.ClaimTrialAPIKey(ctx, entTenant.TenantID, rawKey, entProj.ProjectID, "", entOwner.MemberID)
+	if err != nil {
+		t.Fatalf("failed to claim trial key: %v", err)
+	}
+
+	if claimedKey.TenantID != entTenant.TenantID {
+		t.Errorf("expected tenant %s, got %s", entTenant.TenantID, claimedKey.TenantID)
+	}
+	if claimedKey.ProjectID != entProj.ProjectID {
+		t.Errorf("expected project %s, got %s", entProj.ProjectID, claimedKey.ProjectID)
+	}
+	if claimedKey.ExpiresAt != nil {
+		t.Errorf("expected nil ExpiresAt after claim, got %v", claimedKey.ExpiresAt)
+	}
+
+	// 4. Verify wallet re-routing: the EXACT SAME rawKey now resolves to the enterprise wallet!
+	wAccAfter, err := wlt.GetWalletByAPIKey(ctx, rawKey)
+	if err != nil {
+		t.Fatalf("failed to get wallet after claim: %v", err)
+	}
+	if wAccAfter.TenantID != entTenant.TenantID {
+		t.Errorf("expected claimed key to route to %s, got %s", entTenant.TenantID, wAccAfter.TenantID)
+	}
+
+	// 5. Verify claim conflict protection: another tenant cannot re-claim this key
+	otherTenant, otherOwner, _ := svc.CreateTenant(ctx, "Attacker Corp", "ten_other_02", "attacker@other.io", "CNY")
+	_, errConflict := svc.ClaimTrialAPIKey(ctx, otherTenant.TenantID, rawKey, "", "", otherOwner.MemberID)
+	if errConflict == nil {
+		t.Errorf("expected error when claiming key already bound to another tenant, got nil")
+	}
+
+	// 6. Verify non-guest key rejection
+	_, errInvalid := svc.ClaimTrialAPIKey(ctx, entTenant.TenantID, "apk_live_regular_key_123", "", "", entOwner.MemberID)
+	if errInvalid == nil {
+		t.Errorf("expected error for non apk_live_guest key, got nil")
 	}
 }
