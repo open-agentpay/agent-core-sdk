@@ -4,14 +4,199 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
+
+var (
+	trialRateLimiterMu sync.Mutex
+	trialIPHistory     = make(map[string][]time.Time)
+)
+
+func checkAndRecordTrialIP(clientIP string, limit int, window time.Duration) bool {
+	trialRateLimiterMu.Lock()
+	defer trialRateLimiterMu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-window)
+
+	times := trialIPHistory[clientIP]
+	valid := make([]time.Time, 0, len(times))
+	for _, t := range times {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+
+	if len(valid) >= limit {
+		trialIPHistory[clientIP] = valid
+		return false
+	}
+
+	valid = append(valid, now)
+	trialIPHistory[clientIP] = valid
+	return true
+}
+
+func (s *MemoryService) CreateTrialAPIKey(ctx context.Context, clientIP, fingerprint string) (*TrialKeyResponse, error) {
+	cleanIP := strings.TrimSpace(clientIP)
+	if cleanIP == "" {
+		cleanIP = "127.0.0.1"
+	}
+	if !checkAndRecordTrialIP(cleanIP, 3, 24*time.Hour) {
+		return nil, ErrTrialRateLimitExceeded
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().Unix()
+	if _, ok := s.tenants[PublicSandboxTenantID]; !ok {
+		s.tenants[PublicSandboxTenantID] = &Tenant{
+			TenantID:  PublicSandboxTenantID,
+			Name:      "OpenAgentPay Public Sandbox",
+			Currency:  "CNY",
+			Status:    TenantStatusActive,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	}
+	if _, ok := s.projects[PublicSandboxProjectID]; !ok {
+		s.projects[PublicSandboxProjectID] = &Project{
+			ProjectID:          PublicSandboxProjectID,
+			TenantID:           PublicSandboxTenantID,
+			Name:               "Sandbox Trial Project",
+			BudgetCapBaseUnits: 1000000000,
+			Status:             ProjectStatusActive,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}
+	}
+	if _, ok := s.agents[PublicSandboxAgentID]; !ok {
+		s.agents[PublicSandboxAgentID] = &Agent{
+			AgentID:      PublicSandboxAgentID,
+			TenantID:     PublicSandboxTenantID,
+			ProjectID:    PublicSandboxProjectID,
+			Name:         "Sandbox Guest Agent",
+			Status:       AgentStatusActive,
+			PolicyConfig: map[string]interface{}{},
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+	}
+
+	rawKey, keyHash, keyPrefix := GenerateTrialRawAPIKey()
+	keyID := GenerateAPIKeyID()
+	expTime := now + 24*3600
+
+	scopes := []string{"gateway:call", "marketplace:trial"}
+	k := &APIKey{
+		KeyID:     keyID,
+		TenantID:  PublicSandboxTenantID,
+		ProjectID: PublicSandboxProjectID,
+		AgentID:   PublicSandboxAgentID,
+		Name:      "Public Marketplace Trial Key",
+		KeyHash:   keyHash,
+		KeyPrefix: keyPrefix,
+		Scopes:    scopes,
+		Status:    APIKeyStatusActive,
+		ExpiresAt: &expTime,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	s.apiKeys[k.KeyID] = k
+
+	if s.agentRegistry != nil {
+		s.agentRegistry.BindAPIKeyHash(keyHash, PublicSandboxAgentID)
+	}
+	if s.walletSvc != nil {
+		if memWlt, ok := s.walletSvc.(*wallet.MemoryService); ok {
+			memWlt.RegisterAPIKey(rawKey, PublicSandboxTenantID, PublicSandboxProjectID, PublicSandboxAgentID)
+		}
+	}
+
+	return &TrialKeyResponse{
+		Success:          true,
+		APIKey:           rawKey,
+		BalanceCNY:       "5.00",
+		BalanceBaseUnits: 5000000,
+		SingleTxCapCNY:   "0.50",
+		RateLimitRPM:     6,
+		ExpiresAt:        expTime,
+		ExpiresInHours:   24,
+		ClaimURL:         "https://console.aipmedia.cn/apikeys?claim=" + rawKey,
+	}, nil
+}
+
+func (p *PostgresService) CreateTrialAPIKey(ctx context.Context, clientIP, fingerprint string) (*TrialKeyResponse, error) {
+	cleanIP := strings.TrimSpace(clientIP)
+	if cleanIP == "" {
+		cleanIP = "127.0.0.1"
+	}
+	if !checkAndRecordTrialIP(cleanIP, 3, 24*time.Hour) {
+		return nil, ErrTrialRateLimitExceeded
+	}
+
+	// Idempotently ensure sandbox records exist
+	_, _ = p.db.ExecContext(ctx, `
+		INSERT INTO ap_tenant (tenant_id, name, currency, status)
+		VALUES ('ten_public_sandbox', 'OpenAgentPay Public Sandbox', 'CNY', 'active')
+		ON CONFLICT (tenant_id) DO NOTHING;
+
+		INSERT INTO ap_project (project_id, tenant_id, name, budget_cap_base_units, status)
+		VALUES ('prj_sandbox', 'ten_public_sandbox', 'Sandbox Trial Project', 1000000000, 'active')
+		ON CONFLICT (project_id) DO NOTHING;
+
+		INSERT INTO ap_agent (agent_id, tenant_id, project_id, name, status)
+		VALUES ('agt_sandbox', 'ten_public_sandbox', 'prj_sandbox', 'Sandbox Guest Agent', 'active')
+		ON CONFLICT (project_id, name) DO NOTHING;
+
+		INSERT INTO ap_wallet (wallet_id, tenant_id, asset, status, available_cache)
+		VALUES ('wlt_public_sandbox', 'ten_public_sandbox', 'CNY', 'active', 100000000000)
+		ON CONFLICT (tenant_id) DO NOTHING;
+	`)
+
+	rawKey, keyHash, keyPrefix := GenerateTrialRawAPIKey()
+	keyID := GenerateAPIKeyID()
+	now := time.Now()
+	expTime := now.Add(24 * time.Hour)
+	expUnix := expTime.Unix()
+
+	scopes := []string{"gateway:call", "marketplace:trial"}
+	scopesBytes, _ := json.Marshal(scopes)
+
+	if _, err := p.db.ExecContext(ctx, `
+		INSERT INTO ap_api_key (key_id, tenant_id, project_id, agent_id, name, key_hash, key_prefix, scopes, status, expires_at, created_at, updated_at)
+		VALUES ($1, 'ten_public_sandbox', 'prj_sandbox', 'agt_sandbox', 'Public Marketplace Trial Key', $2, $3, $4, 'active', $5, $6, $6);
+	`, keyID, keyHash, keyPrefix, scopesBytes, expTime, now); err != nil {
+		return nil, fmt.Errorf("failed to insert trial api key: %w", err)
+	}
+
+	if p.agentReg != nil {
+		p.agentReg.BindAPIKeyHash(keyHash, PublicSandboxAgentID)
+	}
+
+	return &TrialKeyResponse{
+		Success:          true,
+		APIKey:           rawKey,
+		BalanceCNY:       "5.00",
+		BalanceBaseUnits: 5000000,
+		SingleTxCapCNY:   "0.50",
+		RateLimitRPM:     6,
+		ExpiresAt:        expUnix,
+		ExpiresInHours:   24,
+		ClaimURL:         "https://console.aipmedia.cn/apikeys?claim=" + rawKey,
+	}, nil
+}
 
 var slugSanitizeRegex = regexp.MustCompile(`[^a-z0-9\-]+`)
 
@@ -455,16 +640,65 @@ func (p *PostgresService) GetMarketplaceRouteBySlug(ctx context.Context, slug st
 	return nil, ErrRouteNotFound
 }
 
-// NewPublicMarketplaceHandler creates an unauthenticated read-only HTTP handler for /api/v1/public/marketplace/...
+// NewPublicMarketplaceHandler creates an unauthenticated HTTP handler for /api/v1/public/marketplace/...
 func NewPublicMarketplaceHandler(svc Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Enable CORS for public storefront / Next.js / Agent discovery clients
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Forwarded-For")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		path := strings.TrimRight(r.URL.Path, "/")
+
+		// Handle POST /api/v1/public/marketplace/trial-key
+		if r.Method == http.MethodPost && path == "/api/v1/public/marketplace/trial-key" {
+			var req TrialKeyRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+
+			// Resolve client IP from X-Forwarded-For or RemoteAddr
+			clientIP := r.Header.Get("X-Forwarded-For")
+			if clientIP != "" {
+				parts := strings.Split(clientIP, ",")
+				clientIP = strings.TrimSpace(parts[0])
+			}
+			if clientIP == "" {
+				clientIP = r.RemoteAddr
+				if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+					clientIP = clientIP[:idx]
+				}
+			}
+
+			trialResp, err := svc.CreateTrialAPIKey(r.Context(), clientIP, req.ClientFingerprint)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				if errors.Is(err, ErrTrialRateLimitExceeded) {
+					w.WriteHeader(http.StatusTooManyRequests)
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"error": map[string]string{
+							"code":    "TRIAL_RATE_LIMIT_EXCEEDED",
+							"message": "当前 IP 试用申领过于频繁，请直接登录控制台获取长期免费 API Key",
+						},
+					})
+					return
+				}
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error": map[string]string{
+						"code":    "ERR_INTERNAL",
+						"message": err.Error(),
+					},
+				})
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(trialResp)
 			return
 		}
 
@@ -474,13 +708,12 @@ func NewPublicMarketplaceHandler(svc Service) http.Handler {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": map[string]string{
 					"code":    "ERR_METHOD_NOT_ALLOWED",
-					"message": "only GET is supported on public marketplace endpoints",
+					"message": "only GET or POST (trial-key) is supported on public marketplace endpoints",
 				},
 			})
 			return
 		}
 
-		path := strings.TrimRight(r.URL.Path, "/")
 		if path == "/api/v1/public/marketplace/routes" {
 			q := r.URL.Query()
 			queryStr := q.Get("q")

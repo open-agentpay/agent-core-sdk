@@ -52,7 +52,33 @@ var (
 	ErrCannotRollbackToActive = errors.New("cannot rollback to currently active version")
 	ErrCurrencyLocked         = errors.New("tenant currency is locked after routes or ledger entries exist")
 	ErrInvalidCurrency        = errors.New("unsupported currency: must be CNY, USD, or EUR")
+	ErrTrialRateLimitExceeded = errors.New("trial rate limit exceeded")
 )
+
+const (
+	PublicSandboxTenantID  = "ten_public_sandbox"
+	PublicSandboxProjectID = "prj_sandbox"
+	PublicSandboxAgentID   = "agt_sandbox"
+	PublicSandboxWalletID  = "wlt_public_sandbox"
+)
+
+// TrialKeyRequest represents the payload for public trial API key generation.
+type TrialKeyRequest struct {
+	ClientFingerprint string `json:"client_fingerprint,omitempty"`
+}
+
+// TrialKeyResponse represents the newly issued trial API key and metadata.
+type TrialKeyResponse struct {
+	Success          bool   `json:"success"`
+	APIKey           string `json:"api_key"`
+	BalanceCNY       string `json:"balance_cny"`
+	BalanceBaseUnits int64  `json:"balance_base_units"`
+	SingleTxCapCNY   string `json:"single_tx_cap_cny"`
+	RateLimitRPM     int    `json:"rate_limit_rpm"`
+	ExpiresAt        int64  `json:"expires_at"`
+	ExpiresInHours   int    `json:"expires_in_hours"`
+	ClaimURL         string `json:"claim_url"`
+}
 
 // Lifecycle statuses.
 type TenantStatus string
@@ -466,6 +492,16 @@ func GenerateRawAPIKey() (rawKey string, keyHash string, keyPrefix string) {
 	_, _ = rand.Read(b)
 	rawKey = "apk_live_" + hex.EncodeToString(b)
 	keyPrefix = rawKey[:12]
+	hash := hex.EncodeToString(sha256Hash([]byte(rawKey)))
+	return rawKey, hash, keyPrefix
+}
+
+// GenerateTrialRawAPIKey creates a guest trial API key with apk_live_guest_ prefix.
+func GenerateTrialRawAPIKey() (rawKey string, keyHash string, keyPrefix string) {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	rawKey = "apk_live_guest_" + hex.EncodeToString(b)
+	keyPrefix = "apk_live_guest_"
 	hash := hex.EncodeToString(sha256Hash([]byte(rawKey)))
 	return rawKey, hash, keyPrefix
 }

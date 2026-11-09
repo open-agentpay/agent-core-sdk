@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -278,5 +279,78 @@ func TestComputeRouteSLA_FirewallInterceptionExclusion(t *testing.T) {
 	}
 	if slaC.HealthStatus != "degraded" && slaC.HealthStatus != "maintenance" {
 		t.Errorf("expected degraded or maintenance for actual upstream failures, got %s", slaC.HealthStatus)
+	}
+}
+
+func TestTrialAPIKeyEndpoint(t *testing.T) {
+	svc := NewMemoryService(nil, nil)
+	handler := NewPublicMarketplaceHandler(svc)
+
+	// 1. Test CORS Preflight
+	optReq := httptest.NewRequest(http.MethodOptions, "/api/v1/public/marketplace/trial-key", nil)
+	optRec := httptest.NewRecorder()
+	handler.ServeHTTP(optRec, optReq)
+	if optRec.Code != http.StatusNoContent {
+		t.Errorf("expected 204 for OPTIONS, got %d", optRec.Code)
+	}
+	if optRec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("expected CORS header *, got %s", optRec.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	testIP := "203.0.113.42"
+
+	// 2. Issue 3 trial keys successfully for this IP
+	for i := 1; i <= 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/public/marketplace/trial-key", nil)
+		req.Header.Set("X-Forwarded-For", testIP)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("attempt %d: expected 200 OK, got %d: %s", i, rec.Code, rec.Body.String())
+		}
+
+		var resp TrialKeyResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("attempt %d: failed to parse response: %v", i, err)
+		}
+		if !resp.Success {
+			t.Errorf("attempt %d: expected success=true", i)
+		}
+		if len(resp.APIKey) < 20 || !strings.HasPrefix(resp.APIKey, "apk_live_guest_") {
+			t.Errorf("attempt %d: invalid api_key format: %s", i, resp.APIKey)
+		}
+		if resp.BalanceCNY != "5.00" {
+			t.Errorf("attempt %d: expected balance 5.00, got %s", i, resp.BalanceCNY)
+		}
+		if resp.RateLimitRPM != 6 {
+			t.Errorf("attempt %d: expected 6 RPM, got %d", i, resp.RateLimitRPM)
+		}
+	}
+
+	// 3. 4th attempt from the same IP must be rate-limited (429)
+	req4 := httptest.NewRequest(http.MethodPost, "/api/v1/public/marketplace/trial-key", nil)
+	req4.Header.Set("X-Forwarded-For", testIP)
+	rec4 := httptest.NewRecorder()
+	handler.ServeHTTP(rec4, req4)
+
+	if rec4.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests on 4th attempt, got %d: %s", rec4.Code, rec4.Body.String())
+	}
+	var errResp map[string]map[string]string
+	_ = json.Unmarshal(rec4.Body.Bytes(), &errResp)
+	if errResp["error"]["code"] != "TRIAL_RATE_LIMIT_EXCEEDED" {
+		t.Errorf("expected error code TRIAL_RATE_LIMIT_EXCEEDED, got %s", errResp["error"]["code"])
+	}
+
+	// 4. A different IP must still succeed (200 OK)
+	diffIP := "198.51.100.99"
+	reqDiff := httptest.NewRequest(http.MethodPost, "/api/v1/public/marketplace/trial-key", nil)
+	reqDiff.Header.Set("X-Forwarded-For", diffIP)
+	recDiff := httptest.NewRecorder()
+	handler.ServeHTTP(recDiff, reqDiff)
+
+	if recDiff.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for different IP, got %d: %s", recDiff.Code, recDiff.Body.String())
 	}
 }

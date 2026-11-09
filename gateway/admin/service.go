@@ -73,9 +73,10 @@ type Service interface {
 	UpdateRoute(ctx context.Context, input *UpdateRouteInput, actorMemberID string) (*Route, error)
 	DeleteRoute(ctx context.Context, tenantID, routeID, actorMemberID string) error
 
-	// Public Marketplace (Read-Only Discovery)
+	// Public Marketplace (Read-Only Discovery & Zero-Friction Trial Key)
 	ListMarketplaceRoutes(ctx context.Context, filter MarketplaceFilter) ([]*MarketplaceRouteItem, error)
 	GetMarketplaceRouteBySlug(ctx context.Context, slug string) (*MarketplaceRouteItem, error)
+	CreateTrialAPIKey(ctx context.Context, clientIP, fingerprint string) (*TrialKeyResponse, error)
 
 	// Policies
 	CreatePolicy(ctx context.Context, pol *Policy, actorMemberID string) (*Policy, error)

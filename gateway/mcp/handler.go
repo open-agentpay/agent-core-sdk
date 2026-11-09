@@ -410,6 +410,25 @@ func (h *Handler) handleToolsCall(
 		}
 	}
 
+	// 3.1 Trial Key Safeguard: restrict guest trial key to routes <= ¥0.50 (500,000 base units)
+	if strings.HasPrefix(apiKey, "apk_live_guest_") && costUnits > 500000 {
+		resp := JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: ToolCallResult{
+				IsError: true,
+				Content: []ToolCallContentItem{
+					{
+						Type: "text",
+						Text: fmt.Sprintf("【AgentFinOps 体验限制】工具 [%s] 属于高价值商业接口 (¥%s/次)。免注册试用 Key 单笔最高支持 ¥0.50，请访问 https://console.aipmedia.cn 获取正式企业 Key 并充值体验。", params.Name, costCny),
+					},
+				},
+			},
+		}
+		h.writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	// 4. Safe Upstream Execution (Zero financial loss on error)
 	holdID := generateHoldID()
 	upstreamPayload, _ := json.Marshal(params.Arguments)

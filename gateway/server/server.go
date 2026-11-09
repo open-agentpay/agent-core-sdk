@@ -397,10 +397,11 @@ func NewWithOptions(
 	mux.HandleFunc(cfg.Metrics.ReadyPath, handleReadyz(rcuMgr))
 	mux.HandleFunc("/version", handleVersion())
 
-	// Register Public Read-Only Marketplace Discovery API (Unauthenticated + CORS)
+	// Register Public Read-Only Marketplace Discovery & Zero-Friction Trial Key API (Unauthenticated + CORS)
 	publicMarketplaceHandler := admin.NewPublicMarketplaceHandler(adminSvc)
 	mux.Handle("/api/v1/public/marketplace/routes", publicMarketplaceHandler)
 	mux.Handle("/api/v1/public/marketplace/routes/", publicMarketplaceHandler)
+	mux.Handle("/api/v1/public/marketplace/trial-key", publicMarketplaceHandler)
 
 	// Register Control Plane Admin REST API
 	// Note: Explicitly register admin domain endpoints so that proxy routes under /api/v1/... (e.g. /api/v1/simple-weather)
