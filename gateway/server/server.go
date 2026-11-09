@@ -17,6 +17,7 @@ import (
 	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 	"github.com/open-agentpay/agent-core-sdk/gateway/auth"
 	"github.com/open-agentpay/agent-core-sdk/gateway/config"
+	"github.com/open-agentpay/agent-core-sdk/gateway/mcp"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
 	"github.com/open-agentpay/agent-core-sdk/gateway/proxy"
@@ -423,6 +424,13 @@ func NewWithOptions(
 	if cfg.Metrics.Enabled {
 		mux.Handle(cfg.Metrics.Path, m.Handler())
 	}
+
+	// Register Standard MCP (Model Context Protocol) Transparent Proxy Endpoints
+	mcpHandler := mcp.NewHandler(rcuMgr, m, opts.PolicyEvaluator, opts.SpendRecorder, opts.Transport)
+	mux.Handle("/v1/mcp/sse", mcpHandler)
+	mux.Handle("/v1/mcp/messages", mcpHandler)
+	mux.Handle("/v1/mcp/messages/", mcpHandler)
+	mux.Handle("/v1/mcp/", mcpHandler)
 
 	// Gateway traffic handler routes via x402 payment processor
 	mux.HandleFunc("/", handleGatewayFallback(rcuMgr, m, processor, adminSvc))
