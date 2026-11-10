@@ -55,15 +55,21 @@ type Option func(*ServerOptions)
 
 // ServerOptions contains optional overrides for GatewayServer components.
 type ServerOptions struct {
-	Verifier          x402.PaymentVerifier
-	SettlementAdapter settlement.SettlementAdapter
-	WalletSvc         wallet.Service
-	Transport         http.RoundTripper
-	AssetResolver     x402.AssetResolver
+	Verifier           x402.PaymentVerifier
+	SettlementAdapter  settlement.SettlementAdapter
+	WalletSvc          wallet.Service
+	Transport          http.RoundTripper
+	AssetResolver      x402.AssetResolver
 	PolicyEvaluator    agent.PolicyEvaluator
 	SpendRecorder      agent.SpendRecorder
 	ExtraRoutes        map[string]http.Handler
 	TenantSubresources map[string]http.Handler
+	PaymentProvider    wallet.PaymentProvider
+}
+
+// WithPaymentProvider provides a pluggable payment provider for fiat topups.
+func WithPaymentProvider(p wallet.PaymentProvider) Option {
+	return func(o *ServerOptions) { o.PaymentProvider = p }
 }
 
 // WithTenantSubresource registers an extension handler for tenant-scoped subresources at /api/v1/tenants/{tenant_id}/<name>
@@ -381,6 +387,9 @@ func NewWithOptions(
 	}
 	adminHandler := admin.NewHandlerWithJWT(adminSvc, jwtMgr)
 	if apiH, ok := adminHandler.(*admin.APIHandler); ok {
+		if opts.PaymentProvider != nil {
+			apiH.SetPaymentProvider(opts.PaymentProvider)
+		}
 		for sub, h := range opts.TenantSubresources {
 			if sub != "" && h != nil {
 				apiH.RegisterSubresource(sub, h)
@@ -402,6 +411,8 @@ func NewWithOptions(
 	mux.Handle("/api/v1/public/marketplace/routes", publicMarketplaceHandler)
 	mux.Handle("/api/v1/public/marketplace/routes/", publicMarketplaceHandler)
 	mux.Handle("/api/v1/public/marketplace/trial-key", publicMarketplaceHandler)
+	mux.Handle("/api/v1/public/mock-pay/confirm", adminHandler)
+	mux.Handle("/api/v1/public/webhooks/wechat-pay", adminHandler)
 
 	// Register Control Plane Admin REST API
 	// Note: Explicitly register admin domain endpoints so that proxy routes under /api/v1/... (e.g. /api/v1/simple-weather)
