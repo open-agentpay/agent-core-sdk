@@ -57,6 +57,9 @@ const (
 	ChannelAdminGrant     TopUpChannel = "admin_grant"
 	ChannelOnchainDeposit TopUpChannel = "onchain_deposit"
 	ChannelFiat           TopUpChannel = "fiat"
+	ChannelWeChatPay      TopUpChannel = "wechat_pay"
+	ChannelAlipay         TopUpChannel = "alipay"
+	ChannelMock           TopUpChannel = "mock"
 )
 
 // TopUpStatus defines the state of a top-up order.
@@ -112,18 +115,20 @@ type LedgerEntry struct {
 
 // TopUpOrder represents a unified top-up order.
 type TopUpOrder struct {
-	TopUpID     string       `json:"topup_id"`
-	WalletID    string       `json:"wallet_id"`
-	TenantID    string       `json:"tenant_id"`
-	Channel     TopUpChannel `json:"channel"`
-	Amount      int64        `json:"amount"`
-	Asset       string       `json:"asset"`
-	Status      TopUpStatus  `json:"status"`
-	ExternalRef string       `json:"external_ref,omitempty"`
-	OperatorID  string       `json:"operator_id,omitempty"`
-	Reason      string       `json:"reason,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
-	ConfirmedAt time.Time    `json:"confirmed_at,omitempty"`
+	TopUpID            string       `json:"topup_id"`
+	WalletID           string       `json:"wallet_id"`
+	TenantID           string       `json:"tenant_id"`
+	Channel            TopUpChannel `json:"channel"`
+	Amount             int64        `json:"amount"` // In minor units (cents for fiat)
+	Asset              string       `json:"asset"`
+	PaymentCurrency    string       `json:"payment_currency,omitempty"`
+	PaymentMinorAmount int64        `json:"payment_minor_amount,omitempty"`
+	Status             TopUpStatus  `json:"status"`
+	ExternalRef        string       `json:"external_ref,omitempty"`
+	OperatorID         string       `json:"operator_id,omitempty"`
+	Reason             string       `json:"reason,omitempty"`
+	CreatedAt          time.Time    `json:"created_at"`
+	ConfirmedAt        time.Time    `json:"confirmed_at,omitempty"`
 }
 
 // APIKeyRecord represents an API key binding to a tenant.
