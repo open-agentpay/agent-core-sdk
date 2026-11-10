@@ -367,7 +367,7 @@ func (m *MemoryService) CreatePendingTopUp(ctx context.Context, order *TopUpOrde
 }
 
 // ConfirmTopUpPayment transitions a pending topup order to confirmed and credits the wallet.
-func (m *MemoryService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*TopUpOrder, error) {
+func (m *MemoryService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, reason string, confirmedAt time.Time) (*TopUpOrder, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -405,6 +405,12 @@ func (m *MemoryService) ConfirmTopUpPayment(ctx context.Context, topupID, extern
 
 	if confirmedAt.IsZero() {
 		confirmedAt = time.Now()
+	}
+	if reason != "" {
+		order.Reason = reason
+	}
+	if order.Reason == "" {
+		order.Reason = "fiat_topup_credit"
 	}
 	order.Status = TopUpStatusConfirmed
 	order.ConfirmedAt = confirmedAt

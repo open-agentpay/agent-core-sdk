@@ -2413,24 +2413,32 @@ func (p *PostgresService) GetTopUpOrders(ctx context.Context, walletID string) (
 	return p.walletSvc.GetTopUpOrders(ctx, walletID)
 }
 
-func (p *PostgresService) CreateTopUpOrder(ctx context.Context, tenantID string, amountCents int64, channel wallet.TopUpChannel, actorMemberID string) (*wallet.TopUpOrder, error) {
+func (p *PostgresService) GetWalletService() wallet.Service {
+	return p.walletSvc
+}
+
+func (p *PostgresService) CreateTopUpOrder(ctx context.Context, tenantID string, amountCents int64, channel wallet.TopUpChannel, reason, actorMemberID string) (*wallet.TopUpOrder, error) {
 	w, err := p.GetWallet(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	topupID := fmt.Sprintf("top_%s_%d", tenantID, time.Now().UnixNano())
+	r := reason
+	if r == "" {
+		r = "topup_credit"
+	}
 	order := &wallet.TopUpOrder{
 		TopUpID:            topupID,
 		WalletID:           w.WalletID,
 		TenantID:           tenantID,
 		Channel:            channel,
 		Amount:             amountCents,
-		Asset:              "CNY",
-		PaymentCurrency:    "CNY",
+		Asset:              w.Asset,
+		PaymentCurrency:    w.Asset,
 		PaymentMinorAmount: amountCents,
 		Status:             wallet.TopUpStatusPending,
 		OperatorID:         actorMemberID,
-		Reason:             "在线充值",
+		Reason:             r,
 		CreatedAt:          time.Now(),
 	}
 	if err := p.walletSvc.CreatePendingTopUp(ctx, order); err != nil {
@@ -2443,8 +2451,8 @@ func (p *PostgresService) GetTopUpOrderByID(ctx context.Context, tenantID, topup
 	return p.walletSvc.GetTopUpOrderByID(ctx, topupID)
 }
 
-func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*wallet.TopUpOrder, error) {
-	return p.walletSvc.ConfirmTopUpPayment(ctx, topupID, externalRef, paidAmountCents, confirmedAt)
+func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, reason string, confirmedAt time.Time) (*wallet.TopUpOrder, error) {
+	return p.walletSvc.ConfirmTopUpPayment(ctx, topupID, externalRef, paidAmountCents, reason, confirmedAt)
 }
 
 // ----------------------------------------------------------------------------

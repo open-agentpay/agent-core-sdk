@@ -476,7 +476,7 @@ func (p *PostgresService) CreatePendingTopUp(ctx context.Context, order *TopUpOr
 }
 
 // ConfirmTopUpPayment transitions a pending topup order to confirmed and credits the wallet atomically.
-func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*TopUpOrder, error) {
+func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, reason string, confirmedAt time.Time) (*TopUpOrder, error) {
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -537,6 +537,11 @@ func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, exte
 		confirmedAt = time.Now()
 	}
 
+	creditReason := reason
+	if creditReason == "" {
+		creditReason = "fiat_topup_credit"
+	}
+
 	// Lock wallet
 	var (
 		currentWalletStatus string
@@ -557,9 +562,10 @@ func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, exte
 		UPDATE ap_topup_order
 		SET status = 'confirmed',
 		    confirmed_at = $1,
-		    external_ref = COALESCE(NULLIF($2, ''), external_ref)
-		WHERE topup_id = $3;
-	`, confirmedAt, externalRef, orderTopUpID)
+		    external_ref = COALESCE(NULLIF($2, ''), external_ref),
+		    reason = COALESCE(NULLIF($3, ''), reason)
+		WHERE topup_id = $4;
+	`, confirmedAt, externalRef, creditReason, orderTopUpID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update topup order: %w", err)
 	}
@@ -571,10 +577,10 @@ func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, exte
 		INSERT INTO ap_ledger_entry (
 			entry_id, wallet_id, tenant_id, type, amount, idempotency_key, ref_type, ref_id, reason, created_at
 		) VALUES (
-			$1, $2, $3, 'topup_credit', $4, $5, 'TopUpOrder', $6, '在线充值到账', $7
+			$1, $2, $3, 'topup_credit', $4, $5, 'TopUpOrder', $6, $7, $8
 		)
 		ON CONFLICT (wallet_id, idempotency_key) DO NOTHING;
-	`, entryID, walletID, tenantID, amount, idemKey, orderTopUpID, confirmedAt)
+	`, entryID, walletID, tenantID, amount, idemKey, orderTopUpID, creditReason, confirmedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert ledger entry: %w", err)
 	}

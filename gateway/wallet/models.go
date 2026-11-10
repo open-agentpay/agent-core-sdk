@@ -57,9 +57,6 @@ const (
 	ChannelAdminGrant     TopUpChannel = "admin_grant"
 	ChannelOnchainDeposit TopUpChannel = "onchain_deposit"
 	ChannelFiat           TopUpChannel = "fiat"
-	ChannelWeChatPay      TopUpChannel = "wechat_pay"
-	ChannelAlipay         TopUpChannel = "alipay"
-	ChannelMock           TopUpChannel = "mock"
 )
 
 // TopUpStatus defines the state of a top-up order.

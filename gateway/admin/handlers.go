@@ -3,7 +3,6 @@ package admin
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -23,17 +22,6 @@ type APIHandler struct {
 	svc                 Service
 	jwtMgr              *auth.JWTManager
 	subresourceHandlers map[string]http.Handler
-	paymentProvider     wallet.PaymentProvider
-}
-
-// SetPaymentProvider sets the optional pluggable payment gateway provider.
-func (h *APIHandler) SetPaymentProvider(p wallet.PaymentProvider) {
-	h.paymentProvider = p
-}
-
-// GetPaymentProvider returns the registered payment provider.
-func (h *APIHandler) GetPaymentProvider() wallet.PaymentProvider {
-	return h.paymentProvider
 }
 
 // RegisterSubresource registers an extension HTTP handler for a tenant subresource (e.g. /api/v1/tenants/{id}/<name>).
@@ -92,12 +80,6 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(path, "/api/v1/public/marketplace"):
 		NewPublicMarketplaceHandler(h.svc).ServeHTTP(w, r)
-		return
-	case path == "/api/v1/public/mock-pay/confirm" && r.Method == http.MethodPost:
-		h.handleMockPayConfirm(w, r)
-		return
-	case path == "/api/v1/public/webhooks/wechat-pay" && r.Method == http.MethodPost:
-		h.handleWeChatPayWebhook(w, r)
 		return
 	case path == "/api/v1/auth-types" && r.Method == http.MethodGet:
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{"types": h.svc.GetAuthTypes()})
@@ -726,8 +708,6 @@ func (h *APIHandler) handleTenantScoped(
 			})
 			return true
 		}
-	case "topup-orders":
-		return h.handleTenantTopUpOrders(w, r, tenantID, actorMemberID, actorMember, clientIP, rest)
 	}
 	return false
 }
@@ -1689,148 +1669,5 @@ func (h *APIHandler) handleAgentTimeline(w http.ResponseWriter, r *http.Request,
 		"total":    total,
 		"count":    len(events),
 		"sessions": sessions,
-	})
-}
-
-// ----------------------------------------------------------------------------
-// Top-Up Orders & Webhooks
-// ----------------------------------------------------------------------------
-
-func (h *APIHandler) handleTenantTopUpOrders(w http.ResponseWriter, r *http.Request, tenantID, actorMemberID string, actorMember *Member, clientIP string, rest []string) bool {
-	method := r.Method
-
-	if len(rest) == 0 && method == http.MethodPost {
-		if err := EnforcePermission(actorMember, PermissionWalletAdjust); err != nil {
-			h.handleError(w, err)
-			return true
-		}
-
-		var body struct {
-			AmountCents int64  `json:"amount_cents"`
-			Channel     string `json:"channel"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			h.writeError(w, http.StatusBadRequest, "ERR_INVALID_PARAM", "malformed JSON body")
-			return true
-		}
-		if body.AmountCents <= 0 {
-			h.writeError(w, http.StatusBadRequest, "ERR_INVALID_PARAM", "充值金额必须大于0")
-			return true
-		}
-
-		ch := wallet.TopUpChannel(body.Channel)
-		if ch == "" {
-			ch = wallet.ChannelMock
-		}
-
-		order, err := h.svc.CreateTopUpOrder(r.Context(), tenantID, body.AmountCents, ch, actorMemberID)
-		if err != nil {
-			h.handleError(w, err)
-			return true
-		}
-
-		var codeURL string
-		if h.paymentProvider != nil {
-			res, prepayErr := h.paymentProvider.CreatePrepayOrder(r.Context(), &wallet.PrepayOrderRequest{
-				TenantID:    tenantID,
-				WalletID:    order.WalletID,
-				AmountCents: order.Amount,
-				Currency:    "CNY",
-				Description: "AgentFinOps 算力充值",
-				ClientIP:    clientIP,
-				OutTradeNo:  order.TopUpID,
-			})
-			if prepayErr == nil && res != nil {
-				codeURL = res.CodeURL
-			}
-		}
-		if codeURL == "" {
-			codeURL = fmt.Sprintf("https://gate.aipmedia.cn/api/v1/public/mock-pay?out_trade_no=%s&amount=%d", order.TopUpID, order.Amount)
-		}
-
-		h.writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"topup_order": order,
-			"code_url":    codeURL,
-			"expires_at":  time.Now().Add(15 * time.Minute).Unix(),
-		})
-		return true
-	}
-
-	if len(rest) == 1 && method == http.MethodGet {
-		if err := EnforcePermission(actorMember, PermissionWalletRead); err != nil {
-			h.handleError(w, err)
-			return true
-		}
-
-		topupID := rest[0]
-		order, err := h.svc.GetTopUpOrderByID(r.Context(), tenantID, topupID)
-		if err != nil {
-			h.handleError(w, err)
-			return true
-		}
-		h.writeJSON(w, http.StatusOK, map[string]interface{}{
-			"topup_order": order,
-		})
-		return true
-	}
-
-	return false
-}
-
-func (h *APIHandler) handleMockPayConfirm(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		OutTradeNo string `json:"out_trade_no"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		h.writeError(w, http.StatusBadRequest, "ERR_INVALID_PARAM", "malformed JSON body")
-		return
-	}
-	outTradeNo := strings.TrimSpace(body.OutTradeNo)
-	if outTradeNo == "" {
-		h.writeError(w, http.StatusBadRequest, "ERR_INVALID_PARAM", "out_trade_no is required")
-		return
-	}
-
-	txID := fmt.Sprintf("mock_tx_%d", time.Now().UnixNano())
-	order, err := h.svc.ConfirmTopUpPayment(r.Context(), outTradeNo, txID, 0, time.Now())
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "ERR_CONFIRM_FAILED", err.Error())
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "沙箱模拟支付成功，已完成入账",
-		"order":   order,
-	})
-}
-
-func (h *APIHandler) handleWeChatPayWebhook(w http.ResponseWriter, r *http.Request) {
-	if h.paymentProvider == nil {
-		h.writeError(w, http.StatusServiceUnavailable, "ERR_PROVIDER_UNAVAILABLE", "no payment provider configured")
-		return
-	}
-
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "ERR_READ_BODY", "failed to read webhook body")
-		return
-	}
-
-	whRes, err := h.paymentProvider.ParseAndVerifyWebhook(r.Context(), r.Header, bodyBytes)
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "ERR_VERIFY_FAILED", err.Error())
-		return
-	}
-
-	_, err = h.svc.ConfirmTopUpPayment(r.Context(), whRes.OutTradeNo, whRes.TransactionID, whRes.PaidAmountCents, whRes.PaidAt)
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "ERR_CONFIRM_FAILED", err.Error())
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"code":    "SUCCESS",
-		"message": "成功",
 	})
 }

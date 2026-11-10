@@ -113,9 +113,10 @@ type Service interface {
 	GetWalletByID(ctx context.Context, walletID string) (*wallet.Wallet, error)
 	GetLedgerEntries(ctx context.Context, walletID string) ([]*wallet.LedgerEntry, error)
 	GetTopUpOrders(ctx context.Context, walletID string) ([]*wallet.TopUpOrder, error)
-	CreateTopUpOrder(ctx context.Context, tenantID string, amountCents int64, channel wallet.TopUpChannel, actorMemberID string) (*wallet.TopUpOrder, error)
+	GetWalletService() wallet.Service
+	CreateTopUpOrder(ctx context.Context, tenantID string, amountCents int64, channel wallet.TopUpChannel, reason, actorMemberID string) (*wallet.TopUpOrder, error)
 	GetTopUpOrderByID(ctx context.Context, tenantID, topupID string) (*wallet.TopUpOrder, error)
-	ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*wallet.TopUpOrder, error)
+	ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, reason string, confirmedAt time.Time) (*wallet.TopUpOrder, error)
 
 	// Audit
 	ListAuditEvents(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*AuditEvent, error)
@@ -1711,24 +1712,32 @@ func (s *MemoryService) GetTopUpOrders(ctx context.Context, walletID string) ([]
 	return s.walletSvc.GetTopUpOrders(ctx, walletID)
 }
 
-func (s *MemoryService) CreateTopUpOrder(ctx context.Context, tenantID string, amountCents int64, channel wallet.TopUpChannel, actorMemberID string) (*wallet.TopUpOrder, error) {
+func (s *MemoryService) GetWalletService() wallet.Service {
+	return s.walletSvc
+}
+
+func (s *MemoryService) CreateTopUpOrder(ctx context.Context, tenantID string, amountCents int64, channel wallet.TopUpChannel, reason, actorMemberID string) (*wallet.TopUpOrder, error) {
 	w, err := s.GetWallet(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	topupID := fmt.Sprintf("top_%s_%d", tenantID, time.Now().UnixNano())
+	r := reason
+	if r == "" {
+		r = "topup_credit"
+	}
 	order := &wallet.TopUpOrder{
 		TopUpID:            topupID,
 		WalletID:           w.WalletID,
 		TenantID:           tenantID,
 		Channel:            channel,
 		Amount:             amountCents,
-		Asset:              "CNY",
-		PaymentCurrency:    "CNY",
+		Asset:              w.Asset,
+		PaymentCurrency:    w.Asset,
 		PaymentMinorAmount: amountCents,
 		Status:             wallet.TopUpStatusPending,
 		OperatorID:         actorMemberID,
-		Reason:             "在线充值",
+		Reason:             r,
 		CreatedAt:          time.Now(),
 	}
 	if err := s.walletSvc.CreatePendingTopUp(ctx, order); err != nil {
@@ -1741,8 +1750,8 @@ func (s *MemoryService) GetTopUpOrderByID(ctx context.Context, tenantID, topupID
 	return s.walletSvc.GetTopUpOrderByID(ctx, topupID)
 }
 
-func (s *MemoryService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*wallet.TopUpOrder, error) {
-	return s.walletSvc.ConfirmTopUpPayment(ctx, topupID, externalRef, paidAmountCents, confirmedAt)
+func (s *MemoryService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, reason string, confirmedAt time.Time) (*wallet.TopUpOrder, error) {
+	return s.walletSvc.ConfirmTopUpPayment(ctx, topupID, externalRef, paidAmountCents, reason, confirmedAt)
 }
 
 // ----------------------------------------------------------------------------
