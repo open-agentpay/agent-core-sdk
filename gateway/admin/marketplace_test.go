@@ -434,4 +434,22 @@ func TestClaimTrialAPIKey(t *testing.T) {
 	if errInvalid == nil {
 		t.Errorf("expected error for non apk_live_guest key, got nil")
 	}
+
+	// 7. Auto-provision test: brand-new tenant with NO projects and NO agents
+	newTenant, newOwner, _ := svc.CreateTenant(ctx, "Zero Setup Corp", "ten_zerosetup_01", "zero@setup.io", "CNY")
+	wlt.RegisterWallet(&wallet.Wallet{
+		WalletID:       "wlt_zerosetup_01",
+		TenantID:       newTenant.TenantID,
+		Asset:          "CNY",
+		AvailableCache: 1000000000,
+		Status:         wallet.StatusActive,
+	})
+	trialResp2, _ := svc.CreateTrialAPIKey(ctx, "10.0.0.89", "fp_zero_setup")
+	claimedKey2, err := svc.ClaimTrialAPIKey(ctx, newTenant.TenantID, trialResp2.APIKey, "", "", newOwner.MemberID)
+	if err != nil {
+		t.Fatalf("failed to claim key for zero setup tenant: %v", err)
+	}
+	if claimedKey2.ProjectID == "" || claimedKey2.AgentID == "" {
+		t.Errorf("expected auto-provisioned project and agent, got project=%s agent=%s", claimedKey2.ProjectID, claimedKey2.AgentID)
+	}
 }

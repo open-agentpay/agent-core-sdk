@@ -175,6 +175,11 @@ func (s *MemoryService) ClaimTrialAPIKey(ctx context.Context, tenantID string, r
 	}
 
 	targetProj := projectID
+	if targetProj != "" {
+		if p, ok := s.projects[targetProj]; !ok || p.TenantID != tenantID || p.Status != "active" {
+			targetProj = ""
+		}
+	}
 	if targetProj == "" {
 		for _, p := range s.projects {
 			if p.TenantID == tenantID && p.Status == "active" {
@@ -184,10 +189,25 @@ func (s *MemoryService) ClaimTrialAPIKey(ctx context.Context, tenantID string, r
 		}
 	}
 	if targetProj == "" {
-		targetProj = "prj_default"
+		newPID := GenerateProjectID()
+		s.projects[newPID] = &Project{
+			ProjectID:          newPID,
+			TenantID:           tenantID,
+			Name:               "默认业务项目 (Default Project)",
+			Status:             "active",
+			BudgetCapBaseUnits: 1000000000,
+			CreatedAt:          time.Now().Unix(),
+			UpdatedAt:          time.Now().Unix(),
+		}
+		targetProj = newPID
 	}
 
 	targetAgent := agentID
+	if targetAgent != "" {
+		if a, ok := s.agents[targetAgent]; !ok || a.TenantID != tenantID || a.Status != AgentStatusActive {
+			targetAgent = ""
+		}
+	}
 	if targetAgent == "" {
 		for _, a := range s.agents {
 			if a.TenantID == tenantID && a.Status == AgentStatusActive {
@@ -197,7 +217,17 @@ func (s *MemoryService) ClaimTrialAPIKey(ctx context.Context, tenantID string, r
 		}
 	}
 	if targetAgent == "" {
-		targetAgent = "agt_default"
+		newAID := GenerateAgentID()
+		s.agents[newAID] = &Agent{
+			AgentID:   newAID,
+			TenantID:  tenantID,
+			ProjectID: targetProj,
+			Name:      "默认智能体 (Default Agent)",
+			Status:    AgentStatusActive,
+			CreatedAt: time.Now().Unix(),
+			UpdatedAt: time.Now().Unix(),
+		}
+		targetAgent = newAID
 	}
 
 	matched.TenantID = tenantID
@@ -330,6 +360,13 @@ func (p *PostgresService) ClaimTrialAPIKey(ctx context.Context, tenantID string,
 	}
 
 	targetProj := strings.TrimSpace(projectID)
+	if targetProj != "" {
+		var validProj bool
+		_ = p.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ap_project WHERE project_id = $1 AND tenant_id = $2 AND status = 'active');`, targetProj, tenantID).Scan(&validProj)
+		if !validProj {
+			targetProj = ""
+		}
+	}
 	if targetProj == "" {
 		_ = p.db.QueryRowContext(ctx, `
 			SELECT project_id FROM ap_project 
@@ -338,10 +375,25 @@ func (p *PostgresService) ClaimTrialAPIKey(ctx context.Context, tenantID string,
 		`, tenantID).Scan(&targetProj)
 	}
 	if targetProj == "" {
-		targetProj = "prj_default"
+		targetProj = GenerateProjectID()
+		_, err = p.db.ExecContext(ctx, `
+			INSERT INTO ap_project (project_id, tenant_id, name, budget_cap_base_units, status)
+			VALUES ($1, $2, '默认业务项目 (Default Project)', 1000000000, 'active')
+			ON CONFLICT (project_id) DO NOTHING;
+		`, targetProj, tenantID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to auto-create default project for new tenant: %w", err)
+		}
 	}
 
 	targetAgent := strings.TrimSpace(agentID)
+	if targetAgent != "" {
+		var validAgent bool
+		_ = p.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ap_agent WHERE agent_id = $1 AND tenant_id = $2 AND status = 'active');`, targetAgent, tenantID).Scan(&validAgent)
+		if !validAgent {
+			targetAgent = ""
+		}
+	}
 	if targetAgent == "" {
 		_ = p.db.QueryRowContext(ctx, `
 			SELECT agent_id FROM ap_agent 
@@ -350,7 +402,26 @@ func (p *PostgresService) ClaimTrialAPIKey(ctx context.Context, tenantID string,
 		`, tenantID).Scan(&targetAgent)
 	}
 	if targetAgent == "" {
-		targetAgent = "agt_default"
+		targetAgent = GenerateAgentID()
+		defaultPolicy := map[string]interface{}{
+			"rate_limit_rpm": 60,
+			"kya": map[string]interface{}{
+				"model_provider": "DeepSeek",
+				"model_version":  "deepseek-v3",
+				"framework":      "LangChain",
+				"autonomy_level": "L2_semi_autonomous",
+				"status":         "verified",
+			},
+		}
+		policyJSON, _ := json.Marshal(defaultPolicy)
+		_, err = p.db.ExecContext(ctx, `
+			INSERT INTO ap_agent (agent_id, tenant_id, project_id, name, status, policy_config)
+			VALUES ($1, $2, $3, '默认智能体 (Default Agent)', 'active', $4)
+			ON CONFLICT (project_id, name) DO NOTHING;
+		`, targetAgent, tenantID, targetProj, policyJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to auto-create default agent for new tenant: %w", err)
+		}
 	}
 
 	newName := fmt.Sprintf("认领转正的测试 Key (%s)", existingPrefix)
