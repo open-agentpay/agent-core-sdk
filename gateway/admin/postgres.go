@@ -2413,6 +2413,40 @@ func (p *PostgresService) GetTopUpOrders(ctx context.Context, walletID string) (
 	return p.walletSvc.GetTopUpOrders(ctx, walletID)
 }
 
+func (p *PostgresService) CreateTopUpOrder(ctx context.Context, tenantID string, amountCents int64, channel wallet.TopUpChannel, actorMemberID string) (*wallet.TopUpOrder, error) {
+	w, err := p.GetWallet(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	topupID := fmt.Sprintf("top_%s_%d", tenantID, time.Now().UnixNano())
+	order := &wallet.TopUpOrder{
+		TopUpID:            topupID,
+		WalletID:           w.WalletID,
+		TenantID:           tenantID,
+		Channel:            channel,
+		Amount:             amountCents,
+		Asset:              "CNY",
+		PaymentCurrency:    "CNY",
+		PaymentMinorAmount: amountCents,
+		Status:             wallet.TopUpStatusPending,
+		OperatorID:         actorMemberID,
+		Reason:             "在线充值",
+		CreatedAt:          time.Now(),
+	}
+	if err := p.walletSvc.CreatePendingTopUp(ctx, order); err != nil {
+		return nil, err
+	}
+	return order, nil
+}
+
+func (p *PostgresService) GetTopUpOrderByID(ctx context.Context, tenantID, topupID string) (*wallet.TopUpOrder, error) {
+	return p.walletSvc.GetTopUpOrderByID(ctx, topupID)
+}
+
+func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*wallet.TopUpOrder, error) {
+	return p.walletSvc.ConfirmTopUpPayment(ctx, topupID, externalRef, paidAmountCents, confirmedAt)
+}
+
 // ----------------------------------------------------------------------------
 // Audit Events
 // ----------------------------------------------------------------------------

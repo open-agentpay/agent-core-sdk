@@ -451,6 +451,208 @@ func (p *PostgresService) CreditTopUp(ctx context.Context, order *TopUpOrder) er
 	return tx.Commit()
 }
 
+// CreatePendingTopUp creates a topup order in pending status.
+func (p *PostgresService) CreatePendingTopUp(ctx context.Context, order *TopUpOrder) error {
+	if order.Amount <= 0 {
+		return fmt.Errorf("topup amount must be positive, got %d", order.Amount)
+	}
+
+	query := `
+		INSERT INTO ap_topup_order (
+			topup_id, wallet_id, tenant_id, channel, amount, asset, payment_currency, payment_minor_amount, status, external_ref, operator_id, reason, created_at
+		) VALUES (
+			$1, $2, $3, $4, $5, 'CNY', $6, $7, 'pending', $8, $9, $10, CURRENT_TIMESTAMP
+		);
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		order.TopUpID, order.WalletID, order.TenantID, string(order.Channel),
+		order.Amount, order.PaymentCurrency, order.PaymentMinorAmount,
+		order.ExternalRef, order.OperatorID, order.Reason,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert pending topup order: %w", err)
+	}
+	return nil
+}
+
+// ConfirmTopUpPayment transitions a pending topup order to confirmed and credits the wallet atomically.
+func (p *PostgresService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*TopUpOrder, error) {
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var (
+		orderTopUpID, walletID, tenantID, channel, status string
+		amount                                           int64
+		createdAt                                        time.Time
+		dbConfirmedAt                                    sql.NullTime
+	)
+
+	// Search order by topup_id or external_ref
+	row := tx.QueryRowContext(ctx, `
+		SELECT topup_id, wallet_id, tenant_id, channel, amount, status, created_at, confirmed_at
+		FROM ap_topup_order
+		WHERE topup_id = $1 OR external_ref = $1
+		FOR UPDATE;
+	`, topupID)
+
+	if err := row.Scan(&orderTopUpID, &walletID, &tenantID, &channel, &amount, &status, &createdAt, &dbConfirmedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("topup order %s not found", topupID)
+		}
+		return nil, fmt.Errorf("failed to query topup order: %w", err)
+	}
+
+	// Idempotent: already confirmed
+	if status == "confirmed" {
+		var oConfAt time.Time
+		if dbConfirmedAt.Valid {
+			oConfAt = dbConfirmedAt.Time
+		}
+		return &TopUpOrder{
+			TopUpID:     orderTopUpID,
+			WalletID:    walletID,
+			TenantID:    tenantID,
+			Channel:     TopUpChannel(channel),
+			Amount:      amount,
+			Asset:       "CNY",
+			Status:      TopUpStatusConfirmed,
+			ExternalRef: externalRef,
+			CreatedAt:   createdAt,
+			ConfirmedAt: oConfAt,
+		}, nil
+	}
+
+	if status != "pending" && status != "created" {
+		return nil, fmt.Errorf("cannot confirm topup order in status: %s", status)
+	}
+
+	if paidAmountCents > 0 && amount != paidAmountCents {
+		return nil, fmt.Errorf("paid amount mismatch: order=%d, paid=%d", amount, paidAmountCents)
+	}
+
+	if confirmedAt.IsZero() {
+		confirmedAt = time.Now()
+	}
+
+	// Lock wallet
+	var (
+		currentWalletStatus string
+		availableCache      int64
+	)
+	err = tx.QueryRowContext(ctx, `
+		SELECT status, available_cache
+		FROM ap_wallet
+		WHERE wallet_id = $1
+		FOR UPDATE;
+	`, walletID).Scan(&currentWalletStatus, &availableCache)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock wallet: %w", err)
+	}
+
+	// Update order to confirmed
+	_, err = tx.ExecContext(ctx, `
+		UPDATE ap_topup_order
+		SET status = 'confirmed',
+		    confirmed_at = $1,
+		    external_ref = COALESCE(NULLIF($2, ''), external_ref)
+		WHERE topup_id = $3;
+	`, confirmedAt, externalRef, orderTopUpID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update topup order: %w", err)
+	}
+
+	// Append ledger credit
+	entryID := fmt.Sprintf("ent_%d", confirmedAt.UnixNano())
+	idemKey := "top_" + orderTopUpID
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO ap_ledger_entry (
+			entry_id, wallet_id, tenant_id, type, amount, idempotency_key, ref_type, ref_id, reason, created_at
+		) VALUES (
+			$1, $2, $3, 'topup_credit', $4, $5, 'TopUpOrder', $6, '在线充值到账', $7
+		)
+		ON CONFLICT (wallet_id, idempotency_key) DO NOTHING;
+	`, entryID, walletID, tenantID, amount, idemKey, orderTopUpID, confirmedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert ledger entry: %w", err)
+	}
+
+	// Auto-unfreeze if frozen_arrears and balance non-negative
+	newWalletStatus := currentWalletStatus
+	if currentWalletStatus == string(StatusFrozenArrears) && (availableCache+amount) >= 0 {
+		newWalletStatus = string(StatusActive)
+	}
+
+	// Update wallet balance
+	_, err = tx.ExecContext(ctx, `
+		UPDATE ap_wallet
+		SET available_cache = available_cache + $1,
+		    status = $2,
+		    version = version + 1,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE wallet_id = $3;
+	`, amount, newWalletStatus, walletID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update wallet balance: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit topup confirmation: %w", err)
+	}
+
+	return &TopUpOrder{
+		TopUpID:     orderTopUpID,
+		WalletID:    walletID,
+		TenantID:    tenantID,
+		Channel:     TopUpChannel(channel),
+		Amount:      amount,
+		Asset:       "CNY",
+		Status:      TopUpStatusConfirmed,
+		ExternalRef: externalRef,
+		CreatedAt:   createdAt,
+		ConfirmedAt: confirmedAt,
+	}, nil
+}
+
+// GetTopUpOrderByID retrieves a specific topup order.
+func (p *PostgresService) GetTopUpOrderByID(ctx context.Context, topupID string) (*TopUpOrder, error) {
+	query := `
+		SELECT topup_id, wallet_id, tenant_id, channel, amount, asset, status,
+		       COALESCE(external_ref, ''), COALESCE(operator_id, ''), COALESCE(reason, ''),
+		       created_at, confirmed_at
+		FROM ap_topup_order
+		WHERE topup_id = $1 OR external_ref = $1;
+	`
+	o := &TopUpOrder{}
+	var confirmedAt sql.NullTime
+	err := p.db.QueryRowContext(ctx, query, topupID).Scan(
+		&o.TopUpID,
+		&o.WalletID,
+		&o.TenantID,
+		&o.Channel,
+		&o.Amount,
+		&o.Asset,
+		&o.Status,
+		&o.ExternalRef,
+		&o.OperatorID,
+		&o.Reason,
+		&o.CreatedAt,
+		&confirmedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("topup order %s not found", topupID)
+		}
+		return nil, fmt.Errorf("failed to query topup order: %w", err)
+	}
+	if confirmedAt.Valid {
+		o.ConfirmedAt = confirmedAt.Time
+	}
+	return o, nil
+}
+
 // ReleaseExpiredHolds sweeps all expired active holds and refunds amounts to available cache.
 func (p *PostgresService) ReleaseExpiredHolds(ctx context.Context, before time.Time) (int64, error) {
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})

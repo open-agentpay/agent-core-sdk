@@ -347,6 +347,113 @@ func (m *MemoryService) CreditTopUp(ctx context.Context, order *TopUpOrder) erro
 	return nil
 }
 
+// CreatePendingTopUp creates a topup order in pending status.
+func (m *MemoryService) CreatePendingTopUp(ctx context.Context, order *TopUpOrder) error {
+	if order.Amount <= 0 {
+		return fmt.Errorf("topup amount must be positive, got %d", order.Amount)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.wallets[order.WalletID]; !ok {
+		return ErrWalletNotFound
+	}
+
+	order.Status = TopUpStatusPending
+	order.CreatedAt = time.Now()
+	m.topups[order.TopUpID] = order
+	return nil
+}
+
+// ConfirmTopUpPayment transitions a pending topup order to confirmed and credits the wallet.
+func (m *MemoryService) ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*TopUpOrder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	order, ok := m.topups[topupID]
+	if !ok {
+		// Try search by external_ref or idempotency
+		for _, o := range m.topups {
+			if o.ExternalRef == externalRef || o.TopUpID == topupID {
+				order = o
+				break
+			}
+		}
+	}
+	if order == nil {
+		return nil, fmt.Errorf("topup order %s not found", topupID)
+	}
+
+	// Idempotent return if already confirmed
+	if order.Status == TopUpStatusConfirmed {
+		return order, nil
+	}
+
+	if order.Status != TopUpStatusPending && order.Status != TopUpStatusCreated {
+		return nil, fmt.Errorf("cannot confirm order in status %s", order.Status)
+	}
+
+	if paidAmountCents > 0 && order.Amount != paidAmountCents {
+		return nil, fmt.Errorf("payment amount mismatch: expected %d, got %d", order.Amount, paidAmountCents)
+	}
+
+	w, ok := m.wallets[order.WalletID]
+	if !ok {
+		return nil, ErrWalletNotFound
+	}
+
+	if confirmedAt.IsZero() {
+		confirmedAt = time.Now()
+	}
+	order.Status = TopUpStatusConfirmed
+	order.ConfirmedAt = confirmedAt
+	order.ExternalRef = externalRef
+
+	w.AvailableCache += order.Amount
+	w.Version++
+	w.UpdatedAt = confirmedAt
+
+	if w.Status == StatusFrozenArrears && w.AvailableCache >= 0 {
+		w.Status = StatusActive
+	}
+
+	idemKey := "top_" + order.TopUpID
+	entry := &LedgerEntry{
+		EntryID:        fmt.Sprintf("ent_%d", confirmedAt.UnixNano()),
+		WalletID:       w.WalletID,
+		TenantID:       w.TenantID,
+		Type:           LedgerTypeTopupCredit,
+		Amount:         order.Amount,
+		IdempotencyKey: idemKey,
+		RefType:        "TopUpOrder",
+		RefID:          order.TopUpID,
+		OperatorID:     order.OperatorID,
+		Reason:         order.Reason,
+		CreatedAt:      confirmedAt,
+	}
+
+	compKey := w.WalletID + ":" + idemKey
+	if !m.ledgerIdempotency[compKey] {
+		m.ledgerEntries[w.WalletID] = append(m.ledgerEntries[w.WalletID], entry)
+		m.ledgerIdempotency[compKey] = true
+	}
+
+	return order, nil
+}
+
+// GetTopUpOrderByID retrieves a specific topup order.
+func (m *MemoryService) GetTopUpOrderByID(ctx context.Context, topupID string) (*TopUpOrder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	order, ok := m.topups[topupID]
+	if !ok {
+		return nil, fmt.Errorf("topup order %s not found", topupID)
+	}
+	return order, nil
+}
+
 // AdjustBalance increases or decreases available funds and registers ledger adjustment.
 func (m *MemoryService) AdjustBalance(ctx context.Context, walletID string, amount int64, reason, idempotencyKey, operatorID string) error {
 	m.mu.Lock()

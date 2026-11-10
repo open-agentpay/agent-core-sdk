@@ -22,6 +22,9 @@ type Service interface {
 
 	// TopUp and Funds Injection
 	CreditTopUp(ctx context.Context, order *TopUpOrder) error
+	CreatePendingTopUp(ctx context.Context, order *TopUpOrder) error
+	ConfirmTopUpPayment(ctx context.Context, topupID, externalRef string, paidAmountCents int64, confirmedAt time.Time) (*TopUpOrder, error)
+	GetTopUpOrderByID(ctx context.Context, topupID string) (*TopUpOrder, error)
 	AdjustBalance(ctx context.Context, walletID string, amount int64, reason, idempotencyKey, operatorID string) error
 	SetWalletStatus(ctx context.Context, walletID string, status WalletStatus) error
 
