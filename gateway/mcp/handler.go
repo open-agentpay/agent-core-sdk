@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/i18n"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
 	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
@@ -352,7 +353,7 @@ func (h *Handler) handleToolsCall(
 				Content: []ToolCallContentItem{
 					{
 						Type: "text",
-						Text: fmt.Sprintf("【AgentFinOps 路由错误】未找到对应工具或路由: %s", params.Name),
+						Text: i18n.FormatZH("MCP_ERR_ROUTE_NOT_FOUND", params.Name),
 					},
 				},
 			},
@@ -431,7 +432,7 @@ func (h *Handler) handleToolsCall(
 					Content: []ToolCallContentItem{
 						{
 							Type: "text",
-							Text: fmt.Sprintf("【AgentFinOps 财务防火墙拦截】工具 [%s] 预估费用 ¥%s 超出组织预算或单笔限额: %s (%s)。请联系管理员提升预算或切换低成本方案。", params.Name, costCny, decision.Reason, decision.ReasonCode),
+							Text: i18n.FormatZH("MCP_ERR_POLICY_BLOCKED", params.Name, costCny, decision.Reason, decision.ReasonCode),
 						},
 					},
 				},
@@ -452,7 +453,7 @@ func (h *Handler) handleToolsCall(
 					Content: []ToolCallContentItem{
 						{
 							Type: "text",
-							Text: fmt.Sprintf("【AgentFinOps 试用限制】工具 [%s] 已关闭免密试用体验，请访问 https://console.aipmedia.cn 获取正式企业 Key。", params.Name),
+							Text: i18n.FormatZH("MCP_ERR_TRIAL_NOT_ALLOWED", params.Name),
 						},
 					},
 				},
@@ -469,7 +470,7 @@ func (h *Handler) handleToolsCall(
 					Content: []ToolCallContentItem{
 						{
 							Type: "text",
-							Text: fmt.Sprintf("【AgentFinOps 体验限制】工具 [%s] 属于高价值商业接口 (¥%s/次)。免注册试用 Key 单笔最高支持 ¥0.50，请访问 https://console.aipmedia.cn 获取正式企业 Key 并充值体验。", params.Name, costCny),
+							Text: i18n.FormatZH("MCP_ERR_TRIAL_CAP_EXCEEDED", params.Name, costCny),
 						},
 					},
 				},
@@ -497,7 +498,7 @@ func (h *Handler) handleToolsCall(
 				Content: []ToolCallContentItem{
 					{
 						Type: "text",
-						Text: fmt.Sprintf("创建上游请求失败: %v。已自动释放预扣额度。", err),
+						Text: i18n.FormatZH("MCP_ERR_UPSTREAM_REQUEST", err),
 					},
 				},
 			},
@@ -527,7 +528,7 @@ func (h *Handler) handleToolsCall(
 				Content: []ToolCallContentItem{
 					{
 						Type: "text",
-						Text: fmt.Sprintf("上游服务调用异常或超时: %v。已自动解冻释放预扣额度 ¥%s，无资金损失。", err, costCny),
+						Text: i18n.FormatZH("MCP_ERR_UPSTREAM_TIMEOUT", err, costCny),
 					},
 				},
 			},
@@ -549,7 +550,7 @@ func (h *Handler) handleToolsCall(
 				Content: []ToolCallContentItem{
 					{
 						Type: "text",
-						Text: fmt.Sprintf("上游服务返回错误状态码 %d: %s。已自动解冻释放预扣额度。", upstreamResp.StatusCode, string(respBody)),
+						Text: i18n.FormatZH("MCP_ERR_UPSTREAM_STATUS", upstreamResp.StatusCode, string(respBody)),
 					},
 				},
 			},

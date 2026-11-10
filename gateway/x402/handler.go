@@ -892,22 +892,20 @@ func (p *PaymentProcessor) handleWalletPayment(
 	if strings.HasPrefix(apiKey, "apk_live_guest_") && (wallet.TenantID == "ten_public_sandbox" || wallet.TenantID == "") {
 		if !route.TrialAllowed() {
 			sc.recordReq(wallet.TenantID, defaultProjectID, wallet.APIKeyID, "", "", http.StatusForbidden, "ERR_TRIAL_NOT_ALLOWED", false)
-			WriteProtocolError(w, "ERR_TRIAL_NOT_ALLOWED", sc.requestID, map[string]interface{}{
+			WriteProtocolError(w, ErrCodeTrialNotAllowed, sc.requestID, map[string]interface{}{
 				"route_id": route.RouteID,
-				"message":  "【AgentFinOps 试用限制】该接口已关闭免密试用体验，请登录控制台获取正式企业 Key。",
 			})
 			return
 		}
 		if route.PriceBaseUnits > 500000 {
 			costCny := fmt.Sprintf("%.2f", float64(route.PriceBaseUnits)/1000000.0)
 			sc.recordReq(wallet.TenantID, defaultProjectID, wallet.APIKeyID, "", "", http.StatusForbidden, "ERR_TRIAL_SINGLE_TX_CAP_EXCEEDED", false)
-			WriteProtocolError(w, "ERR_TRIAL_SINGLE_TX_CAP_EXCEEDED", sc.requestID, map[string]interface{}{
+			WriteProtocolError(w, ErrCodeTrialSingleTxCapExceeded, sc.requestID, map[string]interface{}{
 				"route_id":                route.RouteID,
 				"price_base_units":        route.PriceBaseUnits,
 				"price_cny":               costCny,
 				"max_single_tx_base_unit": 500000,
 				"max_single_tx_cny":       "0.50",
-				"message":                 fmt.Sprintf("【AgentFinOps 试用限制】该接口单次调用费用 (¥%s) 超出免密试用 Key 单笔上限 (¥0.50)，请访问 https://console.aipmedia.cn 获取正式企业 Key 并充值体验。", costCny),
 			})
 			return
 		}

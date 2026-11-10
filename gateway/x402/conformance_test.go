@@ -109,6 +109,9 @@ func TestCanonicalErrorsIntegrityAgainstTaxonomy(t *testing.T) {
 		if envelope.Error.Details["foo"] != "bar" {
 			t.Errorf("expected details foo=bar, got %v", envelope.Error.Details["foo"])
 		}
+		if envelope.Error.Msg != "钱包可用余额不足以支付本次请求，请前往控制台充值。" {
+			t.Errorf("expected localized Chinese msg, got %q", envelope.Error.Msg)
+		}
 	})
 }
 

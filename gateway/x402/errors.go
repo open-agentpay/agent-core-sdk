@@ -3,6 +3,8 @@ package x402
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/open-agentpay/agent-core-sdk/gateway/i18n"
 )
 
 // Canonical Error Code Constants matching specs/conformance/protocol-errors.json (T1.3)
@@ -251,6 +253,7 @@ type ProtocolErrorEnvelope struct {
 type ProtocolErrorDetail struct {
 	Code      string                 `json:"code"`
 	Message   string                 `json:"message"`
+	Msg       string                 `json:"msg"`
 	Domain    string                 `json:"domain"`
 	Status    int                    `json:"status"`
 	RequestID string                 `json:"requestId"`
@@ -272,10 +275,16 @@ func WriteProtocolError(w http.ResponseWriter, code string, requestID string, de
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(desc.Status)
 
+	zhMsg := i18n.ZH(desc.Code)
+	if zhMsg == "" {
+		zhMsg = desc.Message
+	}
+
 	_ = json.NewEncoder(w).Encode(ProtocolErrorEnvelope{
 		Error: ProtocolErrorDetail{
 			Code:      desc.Code,
 			Message:   desc.Message,
+			Msg:       zhMsg,
 			Domain:    desc.Domain,
 			Status:    desc.Status,
 			RequestID: requestID,
