@@ -430,18 +430,7 @@ func (h *APIHandler) handleFlatWalletSubpath(
 			if method != http.MethodPost {
 				return false
 			}
-			var body struct {
-				Amount         int64  `json:"amount"`
-				Reason         string `json:"reason"`
-				IdempotencyKey string `json:"idempotency_key"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if err := h.svc.AdjustWallet(r.Context(), walletID, body.Amount, body.Reason, body.IdempotencyKey, actorMemberID, clientIP); err != nil {
-				h.handleError(w, err)
-				return true
-			}
-			wlt, _ := h.svc.GetWalletByID(r.Context(), walletID)
-			h.writeJSON(w, http.StatusOK, map[string]interface{}{"wallet": wlt})
+			h.writeError(w, http.StatusForbidden, "ERR_ENDPOINT_DISABLED", "Manual wallet adjustment API has been disabled.")
 			return true
 
 		case "freeze", "unfreeze":
@@ -1341,18 +1330,7 @@ func (h *APIHandler) handleTenantWallets(w http.ResponseWriter, r *http.Request,
 		return true
 	}
 	if len(rest) == 1 && rest[0] == "admin-grant" && r.Method == http.MethodPost {
-		var body struct {
-			Amount         int64  `json:"amount"`
-			Reason         string `json:"reason"`
-			IdempotencyKey string `json:"idempotency_key"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if err := h.svc.AdminGrantWallet(r.Context(), tenantID, body.Amount, body.Reason, body.IdempotencyKey, actorMemberID, clientIP); err != nil {
-			h.handleError(w, err)
-			return true
-		}
-		wlt, _ := h.svc.GetWallet(r.Context(), tenantID)
-		h.writeJSON(w, http.StatusOK, map[string]interface{}{"wallet": wlt})
+		h.writeError(w, http.StatusForbidden, "ERR_ENDPOINT_DISABLED", "Admin wallet grant API has been disabled.")
 		return true
 	}
 	return false

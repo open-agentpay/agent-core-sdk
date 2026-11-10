@@ -2,9 +2,13 @@ package admin
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/open-agentpay/agent-core-sdk/gateway/auth"
 	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
@@ -101,5 +105,55 @@ func TestTopUpArrearsAutoRecovery(t *testing.T) {
 	}
 	if wltAfter.Status != wallet.StatusActive {
 		t.Errorf("expected wallet status to be restored to active, got %s", wltAfter.Status)
+	}
+}
+
+func TestDisabledEndpoints(t *testing.T) {
+	ctx := context.Background()
+	svc, _, _ := setupTestService()
+	jwtMgr, err := auth.NewJWTManager("test_secret_for_jwt_testing_32bytes!!", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("failed to create jwt manager: %v", err)
+	}
+	handler := NewHandlerWithJWT(svc, jwtMgr)
+
+	tenant, owner, err := svc.CreateTenant(ctx, "Disabled Test Corp", "ten_dis", "owner@dis.com")
+	if err != nil {
+		t.Fatalf("failed to create tenant: %v", err)
+	}
+	wlt, err := svc.GetWallet(ctx, tenant.TenantID)
+	if err != nil {
+		t.Fatalf("failed to get wallet: %v", err)
+	}
+
+	token, err := jwtMgr.GenerateToken(owner.MemberID, owner.Email, tenant.TenantID, string(owner.Role))
+	if err != nil {
+		t.Fatalf("failed to generate token: %v", err)
+	}
+
+	// 1. Test POST /api/v1/wallets/{wallet_id}/adjust is disabled
+	reqAdjust := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/"+wlt.WalletID+"/adjust", strings.NewReader(`{"amount":100,"reason":"test"}`))
+	reqAdjust.Header.Set("Authorization", "Bearer "+token)
+	recAdjust := httptest.NewRecorder()
+	handler.ServeHTTP(recAdjust, reqAdjust)
+
+	if recAdjust.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for disabled adjust endpoint, got %d: %s", recAdjust.Code, recAdjust.Body.String())
+	}
+	if !strings.Contains(recAdjust.Body.String(), "ERR_ENDPOINT_DISABLED") {
+		t.Errorf("expected ERR_ENDPOINT_DISABLED in response, got: %s", recAdjust.Body.String())
+	}
+
+	// 2. Test POST /api/v1/tenants/{tenant_id}/wallets/admin-grant is disabled
+	reqGrant := httptest.NewRequest(http.MethodPost, "/api/v1/tenants/"+tenant.TenantID+"/wallets/admin-grant", strings.NewReader(`{"amount":100,"reason":"test"}`))
+	reqGrant.Header.Set("Authorization", "Bearer "+token)
+	recGrant := httptest.NewRecorder()
+	handler.ServeHTTP(recGrant, reqGrant)
+
+	if recGrant.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for disabled admin-grant endpoint, got %d: %s", recGrant.Code, recGrant.Body.String())
+	}
+	if !strings.Contains(recGrant.Body.String(), "ERR_ENDPOINT_DISABLED") {
+		t.Errorf("expected ERR_ENDPOINT_DISABLED in response, got: %s", recGrant.Body.String())
 	}
 }
