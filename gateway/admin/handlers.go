@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1579,6 +1580,11 @@ func (h *APIHandler) writeJSON(w http.ResponseWriter, statusCode int, data inter
 }
 
 func (h *APIHandler) writeError(w http.ResponseWriter, statusCode int, code, message string) {
+	if statusCode >= 500 {
+		slog.Error("admin control-plane request error", slog.Int("status", statusCode), slog.String("code", code), slog.String("message", message))
+	} else if statusCode >= 400 {
+		slog.Warn("admin control-plane client warning", slog.Int("status", statusCode), slog.String("code", code), slog.String("message", message))
+	}
 	h.writeJSON(w, statusCode, map[string]interface{}{
 		"error": map[string]string{
 			"code":    code,

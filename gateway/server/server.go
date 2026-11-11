@@ -17,6 +17,7 @@ import (
 	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
 	"github.com/open-agentpay/agent-core-sdk/gateway/auth"
 	"github.com/open-agentpay/agent-core-sdk/gateway/config"
+	"github.com/open-agentpay/agent-core-sdk/gateway/integration"
 	"github.com/open-agentpay/agent-core-sdk/gateway/mcp"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
@@ -438,6 +439,22 @@ func NewWithOptions(
 	mux.Handle("/v1/mcp/messages", mcpHandler)
 	mux.Handle("/v1/mcp/messages/", mcpHandler)
 	mux.Handle("/v1/mcp/", mcpHandler)
+
+	// Register Framework-Agnostic AgentPay REST Integration API Endpoints
+	integrationHandler := integration.NewHandler(
+		rcuMgr,
+		m,
+		opts.PolicyEvaluator,
+		opts.SpendRecorder,
+		paymentSvc,
+		walletSvc,
+		processor.IdempotencyStore(),
+		adminSvc,
+	)
+	if env := os.Getenv("AGENTPAY_ENVIRONMENT"); env != "" {
+		integrationHandler.SetEnvironment(env)
+	}
+	mux.Handle("/api/v1/integrations/", integrationHandler)
 
 	// Gateway traffic handler routes via x402 payment processor
 	mux.HandleFunc("/", handleGatewayFallback(rcuMgr, m, processor, adminSvc))
