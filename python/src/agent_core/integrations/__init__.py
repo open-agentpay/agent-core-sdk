@@ -7,6 +7,6 @@ Provides first-class tool wrappers and middleware for major AI Agent frameworks:
 
 from __future__ import annotations
 
-from . import langchain, mcp
+from . import crewai, langchain, mcp, openai
 
-__all__ = ["langchain", "mcp"]
+__all__ = ["crewai", "langchain", "mcp", "openai"]
