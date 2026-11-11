@@ -33,7 +33,7 @@ from agent_core.contracts import (
 from agent_core.policy.models import PolicyConfig
 from agent_core.policy.sqlite_engine import SQLitePolicyEngine
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "AgentCoreClient",
