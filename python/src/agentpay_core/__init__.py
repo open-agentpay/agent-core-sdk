@@ -13,13 +13,18 @@ from agent_core import (
     AsyncAgentPayClient,
     PolicyConfig,
     SQLitePolicyEngine,
+    AgentContext,
+    ResourceContext,
+    PaymentRequest,
+    PolicyDecision,
+    PaymentResult,
     __version__,
 )
-from agent_core import client, core, integrations, policy, protocol, state
+from agent_core import client, contracts, core, integrations, policy, protocol, state
 import sys
 
 # Register submodules into sys.modules to support `from agentpay_core.client import ...`
-for _name in ("client", "policy", "core", "protocol", "state", "integrations"):
+for _name in ("client", "contracts", "policy", "core", "protocol", "state", "integrations"):
     _sub = getattr(agent_core, _name, None)
     if _sub is not None:
         sys.modules[f"agentpay_core.{_name}"] = _sub

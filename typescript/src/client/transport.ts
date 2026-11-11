@@ -142,6 +142,7 @@ export class AgentPayTransport {
       raiseOnPolicyRejection: false,
       unmeteredCredentialPolicy: 'block',
       credentialTtlSeconds: 60,
+      baseUrl: options.baseUrl ?? (typeof process !== 'undefined' ? process.env?.AGENTPAY_BASE_URL : undefined) ?? 'http://localhost:8000',
       ...options,
       defaultHeaders,
       walletChallengeMode,
@@ -329,7 +330,16 @@ export class AgentPayTransport {
       }
     }
 
-    if (this.options.walletChallengeMode && isCredential && response.status >= 200 && response.status < 300) {
+    const pathname = (() => {
+      try {
+        return new URL(urlStr).pathname;
+      } catch {
+        return urlStr;
+      }
+    })();
+    const isIntegrationApi = pathname.startsWith('/api/v1/integrations/');
+
+    if (!isIntegrationApi && this.options.walletChallengeMode && isCredential && response.status >= 200 && response.status < 300) {
       throw new PolicyViolationError(
         PolicyErrorCode.UNMETERED_CREDENTIAL,
         'Wallet challenge mode expected a 402 price challenge; the gateway served the credential request directly.',

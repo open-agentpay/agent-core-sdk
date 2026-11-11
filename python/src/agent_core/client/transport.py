@@ -394,7 +394,8 @@ class AgentCoreTransport(_AgentCoreCore, httpx.BaseTransport):
         if meter_id is not None:
             self._meter_end(meter_id, response)
 
-        if self._wallet_challenge_mode and self._has_credential(request) and 200 <= response.status_code < 300:
+        is_integration_api = request.url.path.startswith("/api/v1/integrations/")
+        if not is_integration_api and self._wallet_challenge_mode and self._has_credential(request) and 200 <= response.status_code < 300:
             response.close()
             raise PolicyViolationError(
                 PolicyErrorCode.UNMETERED_CREDENTIAL,
@@ -480,7 +481,8 @@ class AsyncAgentCoreTransport(_AgentCoreCore, httpx.AsyncBaseTransport):
         if meter_id is not None:
             self._meter_end(meter_id, response)
 
-        if self._wallet_challenge_mode and self._has_credential(request) and 200 <= response.status_code < 300:
+        is_integration_api = request.url.path.startswith("/api/v1/integrations/")
+        if not is_integration_api and self._wallet_challenge_mode and self._has_credential(request) and 200 <= response.status_code < 300:
             await response.aclose()
             raise PolicyViolationError(
                 PolicyErrorCode.UNMETERED_CREDENTIAL,
