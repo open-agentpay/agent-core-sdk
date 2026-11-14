@@ -130,14 +130,18 @@ class PaymentChallenge(BaseModel):
         by_alias: bool | None = None,
         by_name: bool | None = None,
     ) -> PaymentChallenge:
+        extra_kwargs: dict[str, Any] = {}
+        if by_alias is not None:
+            extra_kwargs["by_alias"] = by_alias
+        if by_name is not None:
+            extra_kwargs["by_name"] = by_name
         try:
             return super().model_validate(
                 obj,
                 strict=strict,
                 from_attributes=from_attributes,
                 context=context,
-                by_alias=by_alias,
-                by_name=by_name,
+                **extra_kwargs,
             )
         except X402ValidationError:
             raise
@@ -381,14 +385,18 @@ class PaymentAuthorization(BaseModel):
         by_alias: bool | None = None,
         by_name: bool | None = None,
     ) -> PaymentAuthorization:
+        extra_kwargs: dict[str, Any] = {}
+        if by_alias is not None:
+            extra_kwargs["by_alias"] = by_alias
+        if by_name is not None:
+            extra_kwargs["by_name"] = by_name
         try:
             return super().model_validate(
                 obj,
                 strict=strict,
                 from_attributes=from_attributes,
                 context=context,
-                by_alias=by_alias,
-                by_name=by_name,
+                **extra_kwargs,
             )
         except X402ValidationError:
             raise
