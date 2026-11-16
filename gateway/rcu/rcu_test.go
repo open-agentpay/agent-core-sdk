@@ -5,6 +5,43 @@ import (
 	"testing"
 )
 
+func TestRCU_GetLLMRoute(t *testing.T) {
+	snap := &ConfigSnapshot{
+		SchemaVersion: "2.0.0",
+		TenantID:      "ten_test",
+		VersionID:     "ver_llm_1",
+		VersionNumber: 1,
+		Routes: []RouteConfig{
+			{
+				RouteID:                     "rt_llm_deepseek",
+				TenantID:                    "ten_test",
+				RouteType:                   "llm",
+				ModelName:                   "deepseek-v3",
+				PricingType:                 "per_token",
+				PromptTokenPriceBaseUnits:   2000,
+				CompletionTokenPriceBaseUnits: 8000,
+				Status:                      "active",
+				UpstreamURL:                 "https://api.deepseek.com/v1",
+			},
+		},
+	}
+
+	mgr, err := NewManager(snap)
+	if err != nil {
+		t.Fatalf("failed to init manager: %v", err)
+	}
+
+	r, _, _, ok := mgr.GetLLMRouteForTenant("ten_test", "deepseek-v3")
+	if !ok || r == nil || r.RouteID != "rt_llm_deepseek" {
+		t.Fatalf("expected to find LLM route for deepseek-v3, got %v, ok=%v", r, ok)
+	}
+
+	models := mgr.ListLLMModelsForTenant("ten_test")
+	if len(models) != 1 || models[0].ModelName != "deepseek-v3" {
+		t.Fatalf("expected 1 model deepseek-v3, got %v", models)
+	}
+}
+
 func TestRCUManagerUpdateAndMatch(t *testing.T) {
 	v1Routes := []RouteConfig{
 		{

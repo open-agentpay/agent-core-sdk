@@ -65,6 +65,18 @@ type RouteConfig struct {
 	UpstreamAuth          *upstreamauth.UpstreamAuthConfig `json:"upstreamAuth,omitempty"`
 	UpstreamAuthSnake     *upstreamauth.UpstreamAuthConfig `json:"upstream_auth,omitempty"`
 	UpstreamSecrets       map[string]string                `json:"-"`
+	RouteType             string                           `json:"routeType,omitempty"`
+	RouteTypeSnake        string                           `json:"route_type,omitempty"`
+	ModelName             string                           `json:"modelName,omitempty"`
+	ModelNameSnake        string                           `json:"model_name,omitempty"`
+	PricingType           string                           `json:"pricingType,omitempty"`
+	PricingTypeSnake      string                           `json:"pricing_type,omitempty"`
+	PromptTokenPriceBaseUnits int64                        `json:"promptTokenPriceBaseUnits,omitempty"`
+	PromptTokenPriceSnake int64                            `json:"prompt_token_price_base_units,omitempty"`
+	CompletionTokenPriceBaseUnits int64                    `json:"completionTokenPriceBaseUnits,omitempty"`
+	CompletionTokenPriceSnake int64                        `json:"completion_token_price_base_units,omitempty"`
+	ModelMetadata         map[string]interface{}           `json:"modelMetadata,omitempty"`
+	ModelMetadataSnake    map[string]interface{}           `json:"model_metadata,omitempty"`
 }
 
 // TrialAllowed returns whether the route allows trial guest keys.
@@ -133,6 +145,24 @@ func (r *RouteConfig) Normalize() {
 	}
 	if r.UpstreamAuth == nil && r.UpstreamAuthSnake != nil {
 		r.UpstreamAuth = r.UpstreamAuthSnake
+	}
+	if r.RouteType == "" && r.RouteTypeSnake != "" {
+		r.RouteType = r.RouteTypeSnake
+	}
+	if r.ModelName == "" && r.ModelNameSnake != "" {
+		r.ModelName = r.ModelNameSnake
+	}
+	if r.PricingType == "" && r.PricingTypeSnake != "" {
+		r.PricingType = r.PricingTypeSnake
+	}
+	if r.PromptTokenPriceBaseUnits == 0 && r.PromptTokenPriceSnake != 0 {
+		r.PromptTokenPriceBaseUnits = r.PromptTokenPriceSnake
+	}
+	if r.CompletionTokenPriceBaseUnits == 0 && r.CompletionTokenPriceSnake != 0 {
+		r.CompletionTokenPriceBaseUnits = r.CompletionTokenPriceSnake
+	}
+	if r.ModelMetadata == nil && r.ModelMetadataSnake != nil {
+		r.ModelMetadata = r.ModelMetadataSnake
 	}
 }
 
@@ -771,4 +801,60 @@ func (s *ConfigSnapshot) findPolicyForRoute(routeID string) *PolicyConfig {
 		return s.globalPolicy
 	}
 	return nil
+}
+
+// GetLLMRouteForTenant matches a model name to an active LLM route for the tenant.
+func (m *Manager) GetLLMRouteForTenant(tenantID, modelName string) (*RouteConfig, *PolicyConfig, *ConfigSnapshot, bool) {
+	snap := m.Current()
+	if snap == nil {
+		return nil, nil, nil, false
+	}
+	for i := range snap.Routes {
+		r := &snap.Routes[i]
+		isLLM := r.RouteType == "llm" || r.RouteTypeSnake == "llm"
+		name := r.ModelName
+		if name == "" {
+			name = r.ModelNameSnake
+		}
+		if isLLM && name == modelName && (r.Status == "active" || r.Status == "") {
+			expected := r.TenantID
+			if expected == "" {
+				expected = r.TenantIDSnake
+			}
+			if expected == "" {
+				expected = snap.TenantID
+			}
+			if tenantID == "" || expected == "" || expected == tenantID {
+				pol := snap.findPolicyForRoute(r.RouteID)
+				return r, pol, snap, true
+			}
+		}
+	}
+	return nil, nil, snap, false
+}
+
+// ListLLMModelsForTenant returns all active LLM routes configured for the tenant.
+func (m *Manager) ListLLMModelsForTenant(tenantID string) []*RouteConfig {
+	snap := m.Current()
+	if snap == nil {
+		return nil
+	}
+	var res []*RouteConfig
+	for i := range snap.Routes {
+		r := &snap.Routes[i]
+		isLLM := r.RouteType == "llm" || r.RouteTypeSnake == "llm"
+		if isLLM && (r.Status == "active" || r.Status == "") {
+			expected := r.TenantID
+			if expected == "" {
+				expected = r.TenantIDSnake
+			}
+			if expected == "" {
+				expected = snap.TenantID
+			}
+			if tenantID == "" || expected == "" || expected == tenantID {
+				res = append(res, r)
+			}
+		}
+	}
+	return res
 }

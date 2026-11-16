@@ -258,6 +258,12 @@ type Route struct {
 	Parameters            []MarketplaceParameter `json:"parameters,omitempty"`
 	SampleParams          map[string]interface{} `json:"sample_params,omitempty"`
 	SampleResponse        map[string]interface{} `json:"sample_response,omitempty"`
+	RouteType             string                 `json:"route_type,omitempty"`
+	ModelName             string                 `json:"model_name,omitempty"`
+	PricingType           string                 `json:"pricing_type,omitempty"`
+	PromptTokenPriceBaseUnits int64              `json:"prompt_token_price_base_units,omitempty"`
+	CompletionTokenPriceBaseUnits int64          `json:"completion_token_price_base_units,omitempty"`
+	ModelMetadata         map[string]interface{} `json:"model_metadata,omitempty"`
 	Status                RouteStatus            `json:"status"`
 	CreatedAt             int64                  `json:"created_at"`
 	UpdatedAt             int64                  `json:"updated_at"`
@@ -292,6 +298,12 @@ type UpdateRouteInput struct {
 	Parameters            []MarketplaceParameter `json:"parameters,omitempty"`
 	SampleParams          map[string]interface{} `json:"sample_params,omitempty"`
 	SampleResponse        map[string]interface{} `json:"sample_response,omitempty"`
+	RouteType             *string                `json:"route_type,omitempty"`
+	ModelName             *string                `json:"model_name,omitempty"`
+	PricingType           *string                `json:"pricing_type,omitempty"`
+	PromptTokenPriceBaseUnits *int64             `json:"prompt_token_price_base_units,omitempty"`
+	CompletionTokenPriceBaseUnits *int64         `json:"completion_token_price_base_units,omitempty"`
+	ModelMetadata         map[string]interface{} `json:"model_metadata,omitempty"`
 	Status                *RouteStatus           `json:"status,omitempty"`
 }
 
