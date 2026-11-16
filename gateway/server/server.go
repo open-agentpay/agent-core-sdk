@@ -440,6 +440,18 @@ func NewWithOptions(
 	mux.Handle("/v1/mcp/messages/", mcpHandler)
 	mux.Handle("/v1/mcp/", mcpHandler)
 
+	// Register Standard OpenAI-Compatible Model Gateway Endpoints
+	chatHandler := NewChatCompletionHandler(ChatHandlerConfig{
+		RCUMgr:    rcuMgr,
+		Metrics:   m,
+		AdminSvc:  adminSvc,
+		WalletSvc: walletSvc,
+		Transport: opts.Transport,
+	})
+	mux.Handle("/v1/chat/completions", chatHandler)
+	mux.Handle("/v1/models", chatHandler)
+	mux.Handle("/v1/models/", chatHandler)
+
 	// Register Framework-Agnostic AgentPay REST Integration API Endpoints
 	integrationHandler := integration.NewHandler(
 		rcuMgr,
