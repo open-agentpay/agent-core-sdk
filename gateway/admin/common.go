@@ -583,6 +583,21 @@ func normalizeNewRoute(r *Route, tenantCurrency string, now int64) error {
 	if r.Status == "" {
 		r.Status = RouteStatusActive
 	}
+	if strings.TrimSpace(r.RouteType) == "" {
+		r.RouteType = "api"
+	} else {
+		r.RouteType = strings.TrimSpace(r.RouteType)
+	}
+	r.ModelName = strings.TrimSpace(r.ModelName)
+	if strings.TrimSpace(r.PricingType) == "" {
+		if r.RouteType == "llm" {
+			r.PricingType = "per_token"
+		} else {
+			r.PricingType = "fixed"
+		}
+	} else {
+		r.PricingType = strings.TrimSpace(r.PricingType)
+	}
 	r.PayeeAddress = strings.ToLower(strings.TrimSpace(r.PayeeAddress))
 	r.CreatedAt = now
 	r.UpdatedAt = now
@@ -713,6 +728,21 @@ func applyRouteUpdateFields(r *Route, input *UpdateRouteInput, nowUnix int64) er
 	}
 	if input.Status != nil {
 		r.Status = *input.Status
+	}
+	if input.RouteType != nil {
+		r.RouteType = strings.TrimSpace(*input.RouteType)
+	}
+	if input.ModelName != nil {
+		r.ModelName = strings.TrimSpace(*input.ModelName)
+	}
+	if input.PricingType != nil {
+		r.PricingType = strings.TrimSpace(*input.PricingType)
+	}
+	if input.PromptTokenPriceBaseUnits != nil {
+		r.PromptTokenPriceBaseUnits = *input.PromptTokenPriceBaseUnits
+	}
+	if input.CompletionTokenPriceBaseUnits != nil {
+		r.CompletionTokenPriceBaseUnits = *input.CompletionTokenPriceBaseUnits
 	}
 	if input.UpstreamAuth != nil {
 		authCfg := input.UpstreamAuth

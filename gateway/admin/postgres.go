@@ -1445,6 +1445,8 @@ func scanRouteRow(scanner routeRowScanner) (*Route, error) {
 	var cType sql.NullString
 	var cParamsBytes, cSecretEnc []byte
 	var cKeyVersion, cUpdatedAt sql.NullInt64
+	var routeType, modelName, pricingType sql.NullString
+	var promptPrice, completionPrice sql.NullInt64
 
 	if err := scanner.Scan(
 		&r.RouteID, &r.TenantID, &r.ProjectID, &r.Slug, &r.Title,
@@ -1456,8 +1458,29 @@ func scanRouteRow(scanner routeRowScanner) (*Route, error) {
 		&paramsBytes, &sampleParamsBytes, &sampleResponseBytes,
 		&r.Status, &r.CreatedAt, &r.UpdatedAt,
 		&cType, &cParamsBytes, &cSecretEnc, &cKeyVersion, &cUpdatedAt,
+		&routeType, &modelName, &pricingType, &promptPrice, &completionPrice,
 	); err != nil {
 		return nil, err
+	}
+
+	if routeType.Valid && routeType.String != "" {
+		r.RouteType = routeType.String
+	} else {
+		r.RouteType = "api"
+	}
+	if modelName.Valid {
+		r.ModelName = modelName.String
+	}
+	if pricingType.Valid && pricingType.String != "" {
+		r.PricingType = pricingType.String
+	} else {
+		r.PricingType = "fixed"
+	}
+	if promptPrice.Valid {
+		r.PromptTokenPriceBaseUnits = promptPrice.Int64
+	}
+	if completionPrice.Valid {
+		r.CompletionTokenPriceBaseUnits = completionPrice.Int64
 	}
 
 	if len(tagsBytes) > 0 {
@@ -1569,11 +1592,15 @@ func (p *PostgresService) CreateRoute(ctx context.Context, route *Route, actorMe
 		INSERT INTO ap_route (
 			route_id, tenant_id, project_id, slug, title, summary, provider_name, is_public, category, tags, description_md, network, network_label,
 			path_pattern, methods, upstream_url, price_base_units, asset, onchain_price_base_units, onchain_asset,
-			payee_address, allowed_payment_methods, timeout_ms, rate_limit_rpm, parameters, sample_params, sample_response, status, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $29);
+			payee_address, allowed_payment_methods, timeout_ms, rate_limit_rpm, parameters, sample_params, sample_response, status,
+			route_type, model_name, pricing_type, prompt_token_price_base_units, completion_token_price_base_units,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $34);
 	`, route.RouteID, route.TenantID, route.ProjectID, route.Slug, route.Title, route.Summary, route.ProviderName, route.IsPublic, route.Category, tagsJSON, route.DescriptionMD, route.Network, route.NetworkLabel,
 		route.PathPattern, methodsJSON, route.UpstreamURL, route.PriceBaseUnits, route.Asset, onchainPrice, onchainAsset,
-		route.PayeeAddress, route.AllowedPaymentMethods, route.TimeoutMs, route.RateLimitRPM, paramsJSON, sampleParamsJSON, sampleResponseJSON, string(route.Status), now); err != nil {
+		route.PayeeAddress, route.AllowedPaymentMethods, route.TimeoutMs, route.RateLimitRPM, paramsJSON, sampleParamsJSON, sampleResponseJSON, string(route.Status),
+		route.RouteType, route.ModelName, route.PricingType, route.PromptTokenPriceBaseUnits, route.CompletionTokenPriceBaseUnits,
+		now); err != nil {
 		return nil, err
 	}
 
@@ -1595,7 +1622,9 @@ const selectRouteWithAuthCols = `
 	       r.onchain_price_base_units, r.onchain_asset, r.payee_address, r.allowed_payment_methods, r.timeout_ms, r.rate_limit_rpm,
 	       COALESCE(r.parameters, '[]'::jsonb), COALESCE(r.sample_params, '{}'::jsonb), COALESCE(r.sample_response, '{}'::jsonb),
 	       r.status, EXTRACT(EPOCH FROM r.created_at)::bigint, EXTRACT(EPOCH FROM r.updated_at)::bigint,
-	       c.type, c.params, c.secret_enc, c.key_version, EXTRACT(EPOCH FROM c.updated_at)::bigint
+	       c.type, c.params, c.secret_enc, c.key_version, EXTRACT(EPOCH FROM c.updated_at)::bigint,
+	       COALESCE(r.route_type, 'api'), COALESCE(r.model_name, ''), COALESCE(r.pricing_type, 'fixed'),
+	       COALESCE(r.prompt_token_price_base_units, 0), COALESCE(r.completion_token_price_base_units, 0)
 	FROM ap_route r
 	LEFT JOIN api_auth_configs c ON c.api_id = r.route_id
 `
@@ -1698,12 +1727,15 @@ func (p *PostgresService) UpdateRoute(ctx context.Context, input *UpdateRouteInp
 		    payee_address = $7, allowed_payment_methods = $8, timeout_ms = $9, rate_limit_rpm = $10, status = $11,
 		    slug = $12, title = $13, summary = $14, provider_name = $15, is_public = $16, category = $17, tags = $18, description_md = $19, network = $20, network_label = $21,
 		    methods = $22, parameters = $23, sample_params = $24, sample_response = $25,
+		    route_type = $26, model_name = $27, pricing_type = $28, prompt_token_price_base_units = $29, completion_token_price_base_units = $30,
 		    updated_at = NOW()
-		WHERE route_id = $26;
+		WHERE route_id = $31;
 	`, r.PathPattern, r.UpstreamURL, r.PriceBaseUnits, r.Asset, onchainPrice, onchainAsset,
 		r.PayeeAddress, r.AllowedPaymentMethods, r.TimeoutMs, r.RateLimitRPM, string(r.Status),
 		r.Slug, r.Title, r.Summary, r.ProviderName, r.IsPublic, r.Category, tagsJSON, r.DescriptionMD, r.Network, r.NetworkLabel,
-		methodsJSON, paramsJSON, sampleParamsJSON, sampleResponseJSON, input.RouteID); err != nil {
+		methodsJSON, paramsJSON, sampleParamsJSON, sampleResponseJSON,
+		r.RouteType, r.ModelName, r.PricingType, r.PromptTokenPriceBaseUnits, r.CompletionTokenPriceBaseUnits,
+		input.RouteID); err != nil {
 		return nil, err
 	}
 
@@ -2566,7 +2598,9 @@ func (p *PostgresService) SyncRCU(ctx context.Context) error {
 		       r.price_base_units, r.asset, r.onchain_price_base_units, r.onchain_asset, r.payee_address, r.allowed_payment_methods,
 		       r.timeout_ms, r.rate_limit_rpm, r.status,
 		       COALESCE(r.is_trial_allowed, TRUE),
-		       c.type, c.params, c.secret_enc, c.key_version
+		       c.type, c.params, c.secret_enc, c.key_version,
+		       COALESCE(r.route_type, 'api'), COALESCE(r.model_name, ''), COALESCE(r.pricing_type, 'fixed'),
+		       COALESCE(r.prompt_token_price_base_units, 0), COALESCE(r.completion_token_price_base_units, 0)
 		FROM ap_route r
 		LEFT JOIN api_auth_configs c ON c.api_id = r.route_id
 		WHERE r.status = 'active';
@@ -2585,6 +2619,8 @@ func (p *PostgresService) SyncRCU(ctx context.Context) error {
 		var cType sql.NullString
 		var cParamsBytes, cSecretEnc []byte
 		var cKeyVersion sql.NullInt64
+		var routeType, modelName, pricingType sql.NullString
+		var promptPrice, completionPrice sql.NullInt64
 
 		if err := rows.Scan(
 			&r.RouteID, &r.TenantID, &r.ProjectID, &r.PathPattern, &r.UpstreamURL,
@@ -2592,8 +2628,28 @@ func (p *PostgresService) SyncRCU(ctx context.Context) error {
 			&r.TimeoutMS, &r.RateLimitRPM, &r.Status,
 			&isTrialAllowed,
 			&cType, &cParamsBytes, &cSecretEnc, &cKeyVersion,
+			&routeType, &modelName, &pricingType, &promptPrice, &completionPrice,
 		); err != nil {
 			return fmt.Errorf("failed to scan active route: %w", err)
+		}
+		if routeType.Valid && routeType.String != "" {
+			r.RouteType = routeType.String
+		} else {
+			r.RouteType = "api"
+		}
+		if modelName.Valid {
+			r.ModelName = modelName.String
+		}
+		if pricingType.Valid && pricingType.String != "" {
+			r.PricingType = pricingType.String
+		} else {
+			r.PricingType = "fixed"
+		}
+		if promptPrice.Valid {
+			r.PromptTokenPriceBaseUnits = promptPrice.Int64
+		}
+		if completionPrice.Valid {
+			r.CompletionTokenPriceBaseUnits = completionPrice.Int64
 		}
 		if isTrialAllowed.Valid {
 			b := isTrialAllowed.Bool
