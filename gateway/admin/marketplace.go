@@ -750,6 +750,11 @@ func buildMarketplaceRouteItem(ctx context.Context, usageSvc usage.Service, r *R
 		Parameters:            params,
 		SampleParams:          r.SampleParams,
 		SampleResponse:        r.SampleResponse,
+		RouteType:                     r.RouteType,
+		ModelName:                     r.ModelName,
+		PricingType:                   r.PricingType,
+		PromptTokenPriceBaseUnits:     r.PromptTokenPriceBaseUnits,
+		CompletionTokenPriceBaseUnits: r.CompletionTokenPriceBaseUnits,
 		CreatedAt:             r.CreatedAt,
 		UpdatedAt:             r.UpdatedAt,
 	}
@@ -864,6 +869,8 @@ func (p *PostgresService) ListMarketplaceRoutes(ctx context.Context, filter Mark
 		       r.payee_address, r.allowed_payment_methods, r.timeout_ms, r.rate_limit_rpm,
 		       COALESCE(r.parameters, '[]'::jsonb), COALESCE(r.sample_params, '{}'::jsonb), COALESCE(r.sample_response, '{}'::jsonb),
 		       r.status,
+		       COALESCE(r.route_type, 'standard'), COALESCE(r.model_name, ''), COALESCE(r.pricing_type, 'per_call'),
+		       r.prompt_token_price_base_units, r.completion_token_price_base_units,
 		       EXTRACT(EPOCH FROM r.created_at)::bigint, EXTRACT(EPOCH FROM r.updated_at)::bigint,
 		       COALESCE(t.name, 'OpenAgentPay Verified Provider')
 		FROM ap_route r
@@ -889,6 +896,8 @@ func (p *PostgresService) ListMarketplaceRoutes(ctx context.Context, filter Mark
 		var onchainPrice sql.NullInt64
 		var onchainAsset sql.NullString
 		var tenantName string
+		var routeType, modelName, pricingType string
+		var promptPrice, completionPrice sql.NullInt64
 
 		if err := rows.Scan(
 			&r.RouteID, &r.TenantID, &r.ProjectID, &r.Slug, &r.Title,
@@ -900,9 +909,20 @@ func (p *PostgresService) ListMarketplaceRoutes(ctx context.Context, filter Mark
 			&r.PayeeAddress, &r.AllowedPaymentMethods, &r.TimeoutMs, &r.RateLimitRPM,
 			&paramsBytes, &sampleParamsBytes, &sampleResponseBytes,
 			&r.Status,
+			&routeType, &modelName, &pricingType,
+			&promptPrice, &completionPrice,
 			&r.CreatedAt, &r.UpdatedAt, &tenantName,
 		); err != nil {
 			return nil, err
+		}
+		r.RouteType = routeType
+		r.ModelName = modelName
+		r.PricingType = pricingType
+		if promptPrice.Valid {
+			r.PromptTokenPriceBaseUnits = promptPrice.Int64
+		}
+		if completionPrice.Valid {
+			r.CompletionTokenPriceBaseUnits = completionPrice.Int64
 		}
 		if len(tagsBytes) > 0 {
 			_ = json.Unmarshal(tagsBytes, &r.Tags)
