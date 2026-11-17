@@ -174,6 +174,21 @@ func (a *BearerAuthenticator) Validate(params map[string]any, secrets map[string
 
 func (a *BearerAuthenticator) Apply(ctx context.Context, req *http.Request, params map[string]any, secrets map[string]string) error {
 	token := secrets["token"]
+	if token == "" {
+		token = secrets["api_key"]
+	}
+	if token == "" {
+		token = secrets["apiKey"]
+	}
+	if token == "" {
+		token = secrets["key"]
+	}
+	if token == "" && len(secrets) == 1 {
+		for _, v := range secrets {
+			token = v
+			break
+		}
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

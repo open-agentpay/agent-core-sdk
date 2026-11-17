@@ -3,13 +3,13 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
 	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/admin"
+	"github.com/open-agentpay/agent-core-sdk/gateway/httputil"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 	"github.com/open-agentpay/agent-core-sdk/gateway/x402"
@@ -128,7 +128,5 @@ func handleGatewayFallback(rcuMgr *rcu.Manager, m *metrics.Metrics, processor *x
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(data)
+	httputil.WriteJSON(w, statusCode, data)
 }

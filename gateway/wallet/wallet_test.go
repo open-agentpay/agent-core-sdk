@@ -313,3 +313,36 @@ func TestWalletDoubleEntryReconciliation(t *testing.T) {
 		t.Fatalf("expected total in wallet 900000, got %d", report.TotalInWallet)
 	}
 }
+
+func TestWalletPartialCapture(t *testing.T) {
+	ctx := context.Background()
+	svc, walletID, _, _ := setupTestMemoryService()
+
+	holdID, err := svc.HoldFunds(ctx, walletID, 400000, "pi_partial_hold")
+	if err != nil {
+		t.Fatalf("HoldFunds failed: %v", err)
+	}
+
+	w, _ := svc.GetWallet(ctx, walletID)
+	if w.AvailableCache != 600000 || w.HeldCache != 400000 {
+		t.Fatalf("expected available=600000, held=400000; got available=%d, held=%d", w.AvailableCache, w.HeldCache)
+	}
+
+	// Capture 150,000, expecting refund of 250,000
+	if err := svc.CaptureFundsWithAmount(ctx, holdID, 150000); err != nil {
+		t.Fatalf("CaptureFundsWithAmount failed: %v", err)
+	}
+
+	w, _ = svc.GetWallet(ctx, walletID)
+	if w.AvailableCache != 850000 || w.HeldCache != 0 {
+		t.Fatalf("expected available=850000, held=0; got available=%d, held=%d", w.AvailableCache, w.HeldCache)
+	}
+
+	entries, err := svc.GetLedgerEntries(ctx, walletID)
+	if err != nil {
+		t.Fatalf("GetLedgerEntries failed: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Amount != -150000 {
+		t.Fatalf("expected 1 ledger entry of -150000, got %+v", entries)
+	}
+}

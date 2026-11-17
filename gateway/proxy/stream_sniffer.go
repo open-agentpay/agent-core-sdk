@@ -91,16 +91,11 @@ func (s *StreamSniffer) SniffAndForward(w http.ResponseWriter, upstream io.Reade
 							res.CompletionTokens = payload.Usage.CompletionTokens
 						}
 					} else {
-						// 2. Incrementally estimate tokens from content delta
+						// 2. Incrementally estimate tokens from content delta with rune-aware token estimation
 						for _, choice := range payload.Choices {
-							contentLen := len(choice.Delta.Content)
-							if contentLen > 0 {
-								// Rough token estimate: min 1 token per content delta
-								tok := int64((contentLen + 3) / 4)
-								if tok < 1 {
-									tok = 1
-								}
-								estimatedCompletionTokens += tok
+							content := choice.Delta.Content
+							if len(content) > 0 {
+								estimatedCompletionTokens += EstimateTokensFromText(content)
 							}
 						}
 					}
@@ -164,4 +159,23 @@ func (s *StreamSniffer) SniffAndForward(w http.ResponseWriter, upstream io.Reade
 	}
 
 	return res, scanner.Err()
+}
+
+// EstimateTokensFromText estimates token count from text using Unicode rune categorization.
+// CJK runes are typically ~0.8-1.5 tokens each, while Latin words/symbols average ~3.5-4 chars per token.
+func EstimateTokensFromText(text string) int64 {
+	var cjkCount int64
+	var otherCount int64
+	for _, r := range text {
+		if (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3400 && r <= 0x4DBF) || (r >= 0xF900 && r <= 0xFAFF) {
+			cjkCount++
+		} else {
+			otherCount++
+		}
+	}
+	tokens := cjkCount + (otherCount+3)/4
+	if tokens < 1 && len(text) > 0 {
+		tokens = 1
+	}
+	return tokens
 }

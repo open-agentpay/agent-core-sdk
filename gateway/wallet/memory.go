@@ -208,6 +208,11 @@ func (m *MemoryService) HoldFunds(ctx context.Context, walletID string, amount i
 
 // CaptureFunds confirms deduction of held funds and commits to append-only ledger.
 func (m *MemoryService) CaptureFunds(ctx context.Context, holdID string) error {
+	return m.CaptureFundsWithAmount(ctx, holdID, -1)
+}
+
+// CaptureFundsWithAmount captures an exact amount from the hold, refunding any remainder back to available cache.
+func (m *MemoryService) CaptureFundsWithAmount(ctx context.Context, holdID string, actualAmount int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -230,11 +235,19 @@ func (m *MemoryService) CaptureFunds(ctx context.Context, holdID string) error {
 		return ErrWalletNotFound
 	}
 
+	finalAmount := actualAmount
+	if finalAmount <= 0 || finalAmount > hold.Amount {
+		finalAmount = hold.Amount
+	}
+	refund := hold.Amount - finalAmount
+
 	// Update wallet caches
 	w.HeldCache -= hold.Amount
+	w.AvailableCache += refund
 	w.Version++
 	w.UpdatedAt = time.Now()
 
+	hold.Amount = finalAmount
 	hold.Status = HoldStatusCaptured
 
 	// Append immutable ledger entry
@@ -245,7 +258,7 @@ func (m *MemoryService) CaptureFunds(ctx context.Context, holdID string) error {
 		WalletID:       w.WalletID,
 		TenantID:       w.TenantID,
 		Type:           LedgerTypeCapture,
-		Amount:         -hold.Amount,
+		Amount:         -finalAmount,
 		IdempotencyKey: idemKey,
 		RefType:        "Hold",
 		RefID:          hold.HoldID,

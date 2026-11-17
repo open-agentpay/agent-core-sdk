@@ -187,14 +187,18 @@ type Member struct {
 }
 
 type Agent struct {
-	AgentID      string                 `json:"agent_id"`
-	TenantID     string                 `json:"tenant_id"`
-	ProjectID    string                 `json:"project_id"`
-	Name         string                 `json:"name"`
-	Status       AgentStatus            `json:"status"`
-	PolicyConfig map[string]interface{} `json:"policy_config"`
-	CreatedAt    int64                  `json:"created_at"`
-	UpdatedAt    int64                  `json:"updated_at"`
+	AgentID             string                 `json:"agent_id"`
+	TenantID            string                 `json:"tenant_id"`
+	ProjectID           string                 `json:"project_id"`
+	Name                string                 `json:"name"`
+	Status              AgentStatus            `json:"status"`
+	PolicyConfig        map[string]interface{} `json:"policy_config"`
+	CreatedAt           int64                  `json:"created_at"`
+	UpdatedAt           int64                  `json:"updated_at"`
+	RequestsCount       int64                  `json:"requests_count"`
+	TotalSpendBaseUnits int64                  `json:"total_spend_base_units"`
+	RejectRate          string                 `json:"reject_rate"`
+	LastActiveAt        *int64                 `json:"last_active_at,omitempty"`
 }
 
 type APIKey struct {

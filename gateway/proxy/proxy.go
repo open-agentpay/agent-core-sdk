@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	gwhttputil "github.com/open-agentpay/agent-core-sdk/gateway/httputil"
 	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
 )
@@ -37,18 +38,6 @@ const (
 	DefaultMaxBodyBytes = 10 * 1024 * 1024 // 10 MB
 	DefaultTimeout      = 15 * time.Second
 )
-
-// Hop-by-hop headers to strip per RFC 7230 Section 6.1
-var hopByHopHeaders = []string{
-	"Connection",
-	"Keep-Alive",
-	"Proxy-Authenticate",
-	"Proxy-Authorization",
-	"TE",
-	"Trailers",
-	"Transfer-Encoding",
-	"Upgrade",
-}
 
 // PaymentContext represents verified identity and payment metadata to inject upstream.
 type PaymentContext struct {
@@ -334,8 +323,10 @@ func (h *Handler) Forward(w http.ResponseWriter, r *http.Request, route *rcu.Rou
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			// Strip hop-by-hop headers from upstream response
-			for _, h := range hopByHopHeaders {
-				resp.Header.Del(h)
+			for k := range resp.Header {
+				if gwhttputil.IsHopByHopHeader(k) {
+					resp.Header.Del(k)
+				}
 			}
 			// Prevent sensitive upstream server info leaks
 			resp.Header.Del("Server")
@@ -377,12 +368,11 @@ func (h *Handler) Forward(w http.ResponseWriter, r *http.Request, route *rcu.Rou
 // sanitizeHeaders removes Hop-by-Hop headers and client-spoofed identity headers.
 func sanitizeHeaders(hdr http.Header) {
 	// Strip standard hop-by-hop headers
-	for _, h := range hopByHopHeaders {
-		hdr.Del(h)
-	}
-
-	// Strip client-supplied security headers matching untrusted prefixes or agent identity
 	for k := range hdr {
+		if gwhttputil.IsHopByHopHeader(k) {
+			hdr.Del(k)
+			continue
+		}
 		lower := strings.ToLower(k)
 		if strings.HasPrefix(lower, "x-payer-") ||
 			strings.HasPrefix(lower, "x-payment-") ||
@@ -578,9 +568,7 @@ func extractScheme(r *http.Request) string {
 }
 
 func writeProxyError(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	gwhttputil.WriteJSON(w, statusCode, map[string]interface{}{
 		"error":   errorCode,
 		"message": message,
 	})

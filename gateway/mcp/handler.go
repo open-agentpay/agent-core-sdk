@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/httputil"
 	"github.com/open-agentpay/agent-core-sdk/gateway/i18n"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
@@ -626,9 +627,7 @@ func (h *Handler) handleToolsCall(
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(data)
+	httputil.WriteJSON(w, statusCode, data)
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, id interface{}, code int, message string) {

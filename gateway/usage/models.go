@@ -39,6 +39,9 @@ type UsageEvent struct {
 	Asset           string    `json:"asset"`
 	PaymentMethod   string    `json:"payment_method"` // "wallet", "onchain"
 	IsSuccess       bool      `json:"is_success"`
+	PromptTokens    int64     `json:"prompt_tokens,omitempty"`
+	CompletionTokens int64    `json:"completion_tokens,omitempty"`
+	TotalTokens     int64     `json:"total_tokens,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 

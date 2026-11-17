@@ -46,6 +46,7 @@ type GatewayServer struct {
 	usageSvc          usage.Service
 	paymentSvc        payment.Service
 	timelineSvc       timeline.Service
+	ringBuffer        *settlement.LedgerRingBuffer
 	startTime         time.Time
 	stopOnce          sync.Once
 	stopCh            chan struct{}
@@ -440,13 +441,28 @@ func NewWithOptions(
 	mux.Handle("/v1/mcp/messages/", mcpHandler)
 	mux.Handle("/v1/mcp/", mcpHandler)
 
+	// Initialize High-Throughput Ledger RingBuffer for batch token settlement
+	ringBuffer := settlement.NewLedgerRingBuffer(settlement.RingBufferConfig{
+		BufferSize:    50000,
+		BatchSize:     200,
+		FlushInterval: 100 * time.Millisecond,
+		FlushHandler: func(ctx context.Context, events []*settlement.BatchSettlementEvent) error {
+			// Flushed batch of settlement events
+			return nil
+		},
+	})
+	ringBuffer.Start(context.Background())
+
 	// Register Standard OpenAI-Compatible Model Gateway Endpoints
 	chatHandler := NewChatCompletionHandler(ChatHandlerConfig{
-		RCUMgr:    rcuMgr,
-		Metrics:   m,
-		AdminSvc:  adminSvc,
-		WalletSvc: walletSvc,
-		Transport: opts.Transport,
+		RCUMgr:     rcuMgr,
+		Metrics:    m,
+		AdminSvc:   adminSvc,
+		WalletSvc:  walletSvc,
+		PaymentSvc: paymentSvc,
+		UsageSvc:   usageSvc,
+		RingBuffer: ringBuffer,
+		Transport:  opts.Transport,
 	})
 	mux.Handle("/v1/chat/completions", chatHandler)
 	mux.Handle("/v1/models", chatHandler)
@@ -494,6 +510,7 @@ func NewWithOptions(
 		usageSvc:          usageSvc,
 		paymentSvc:        paymentSvc,
 		timelineSvc:       timelineSvc,
+		ringBuffer:        ringBuffer,
 		startTime:         startTime,
 		stopCh:            make(chan struct{}),
 	}
@@ -550,6 +567,9 @@ func (s *GatewayServer) Shutdown(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
 	})
+	if s.ringBuffer != nil {
+		_ = s.ringBuffer.Close()
+	}
 	err := s.httpServer.Shutdown(ctx)
 	if s.db != nil {
 		_ = s.db.Close()

@@ -228,6 +228,11 @@ func (p *PostgresService) HoldFunds(ctx context.Context, walletID string, amount
 
 // CaptureFunds confirms hold deduction and writes append-only ledger entry.
 func (p *PostgresService) CaptureFunds(ctx context.Context, holdID string) error {
+	return p.CaptureFundsWithAmount(ctx, holdID, -1)
+}
+
+// CaptureFundsWithAmount captures an exact amount from the hold, refunding any remainder back to available cache.
+func (p *PostgresService) CaptureFundsWithAmount(ctx context.Context, holdID string, actualAmount int64) error {
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -235,9 +240,9 @@ func (p *PostgresService) CaptureFunds(ctx context.Context, holdID string) error
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		walletID string
-		amount   int64
-		status   string
+		walletID   string
+		heldAmount int64
+		status     string
 	)
 
 	holdQuery := `
@@ -246,7 +251,7 @@ func (p *PostgresService) CaptureFunds(ctx context.Context, holdID string) error
 		WHERE hold_id = $1
 		FOR UPDATE;
 	`
-	err = tx.QueryRowContext(ctx, holdQuery, holdID).Scan(&walletID, &amount, &status)
+	err = tx.QueryRowContext(ctx, holdQuery, holdID).Scan(&walletID, &heldAmount, &status)
 	if err == sql.ErrNoRows {
 		return ErrHoldNotFound
 	}
@@ -274,25 +279,33 @@ func (p *PostgresService) CaptureFunds(ctx context.Context, holdID string) error
 		return fmt.Errorf("failed to lock wallet: %w", err)
 	}
 
-	// Update wallet held cache
+	finalAmount := actualAmount
+	if finalAmount <= 0 || finalAmount > heldAmount {
+		finalAmount = heldAmount
+	}
+	refund := heldAmount - finalAmount
+
+	// Update wallet caches: deduct held cache, return unused amount to available cache
 	updateWallet := `
 		UPDATE ap_wallet
 		SET held_cache = held_cache - $1,
+		    available_cache = available_cache + $2,
 		    version = version + 1,
 		    updated_at = CURRENT_TIMESTAMP
-		WHERE wallet_id = $2;
+		WHERE wallet_id = $3;
 	`
-	if _, err := tx.ExecContext(ctx, updateWallet, amount, walletID); err != nil {
-		return fmt.Errorf("failed to deduct held cache: %w", err)
+	if _, err := tx.ExecContext(ctx, updateWallet, heldAmount, refund, walletID); err != nil {
+		return fmt.Errorf("failed to update wallet cache: %w", err)
 	}
 
-	// Mark hold as captured
+	// Mark hold as captured with actual final amount
 	updateHold := `
 		UPDATE ap_hold
-		SET status = 'captured'
-		WHERE hold_id = $1;
+		SET status = 'captured',
+		    amount = $1
+		WHERE hold_id = $2;
 	`
-	if _, err := tx.ExecContext(ctx, updateHold, holdID); err != nil {
+	if _, err := tx.ExecContext(ctx, updateHold, finalAmount, holdID); err != nil {
 		return fmt.Errorf("failed to mark hold captured: %w", err)
 	}
 
@@ -307,7 +320,7 @@ func (p *PostgresService) CaptureFunds(ctx context.Context, holdID string) error
 		)
 		ON CONFLICT (wallet_id, idempotency_key) DO NOTHING;
 	`
-	if _, err := tx.ExecContext(ctx, insertLedger, entryID, walletID, tenantID, amount, idemKey, holdID); err != nil {
+	if _, err := tx.ExecContext(ctx, insertLedger, entryID, walletID, tenantID, finalAmount, idemKey, holdID); err != nil {
 		return fmt.Errorf("failed to write append-only ledger entry: %w", err)
 	}
 

@@ -18,6 +18,7 @@ type Service interface {
 	// Payment Lifecycle
 	HoldFunds(ctx context.Context, walletID string, amount int64, intentID string) (string, error)
 	CaptureFunds(ctx context.Context, holdID string) error
+	CaptureFundsWithAmount(ctx context.Context, holdID string, actualAmount int64) error
 	ReleaseFunds(ctx context.Context, holdID string) error
 
 	// TopUp and Funds Injection

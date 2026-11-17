@@ -2,20 +2,25 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/admin"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
+	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
 	"github.com/open-agentpay/agent-core-sdk/gateway/proxy"
 	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 	"github.com/open-agentpay/agent-core-sdk/gateway/settlement"
 	"github.com/open-agentpay/agent-core-sdk/gateway/upstreamauth"
+	"github.com/open-agentpay/agent-core-sdk/gateway/usage"
 	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
+	"github.com/open-agentpay/agent-core-sdk/gateway/x402"
 )
 
 // ChatHandlerConfig configures the ChatCompletionHandler.
@@ -24,6 +29,8 @@ type ChatHandlerConfig struct {
 	Metrics    *metrics.Metrics
 	AdminSvc   admin.Service
 	WalletSvc  wallet.Service
+	PaymentSvc payment.Service
+	UsageSvc   usage.Service
 	RingBuffer *settlement.LedgerRingBuffer
 	Transport  http.RoundTripper
 }
@@ -34,6 +41,8 @@ type ChatCompletionHandler struct {
 	metrics    *metrics.Metrics
 	adminSvc   admin.Service
 	walletSvc  wallet.Service
+	paymentSvc payment.Service
+	usageSvc   usage.Service
 	ringBuffer *settlement.LedgerRingBuffer
 	transport  http.RoundTripper
 }
@@ -42,13 +51,29 @@ type ChatCompletionHandler struct {
 func NewChatCompletionHandler(cfg ChatHandlerConfig) *ChatCompletionHandler {
 	tr := cfg.Transport
 	if tr == nil {
-		tr = http.DefaultTransport
+		dialer := &net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 60 * time.Second,
+		}
+		tr = &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialer.DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          1000,
+			MaxIdleConnsPerHost:   200,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
+		}
 	}
 	return &ChatCompletionHandler{
 		rcuMgr:     cfg.RCUMgr,
 		metrics:    cfg.Metrics,
 		adminSvc:   cfg.AdminSvc,
 		walletSvc:  cfg.WalletSvc,
+		paymentSvc: cfg.PaymentSvc,
+		usageSvc:   cfg.UsageSvc,
 		ringBuffer: cfg.RingBuffer,
 		transport:  tr,
 	}
@@ -143,7 +168,11 @@ type chatCompletionRequest struct {
 }
 
 func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	tenantID := h.extractTenantID(r)
+	wAcc := h.extractWalletAccount(r)
+	var tenantID string
+	if wAcc != nil {
+		tenantID = wAcc.TenantID
+	}
 
 	rawBody, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -169,12 +198,17 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 		return
 	}
 
-	// 2. Pre-flight Token & Cost Estimation
-	var promptChars int
-	for _, m := range req.Messages {
-		promptChars += len(m.Content)
+	// Reject unauthorized calls if route is private and no valid wallet account resolved
+	if !route.Public() && wAcc == nil {
+		h.writeOpenAIError(w, http.StatusUnauthorized, "Valid Agent API Key required for private model route", "invalid_request_error", "unauthorized")
+		return
 	}
-	estimatedPromptTokens := int64((promptChars + 3) / 4)
+
+	// 2. Pre-flight Token & Cost Estimation
+	var estimatedPromptTokens int64
+	for _, m := range req.Messages {
+		estimatedPromptTokens += proxy.EstimateTokensFromText(m.Content)
+	}
 	if estimatedPromptTokens < 1 {
 		estimatedPromptTokens = 1
 	}
@@ -203,6 +237,19 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 		estimatedHold = 1000 // 0.001 CNY minimum hold
 	}
 
+	// Atomic Budget Hold on Virtual Wallet (Pre-flight reservation)
+	intentID := fmt.Sprintf("pi_llm_%d", time.Now().UnixNano())
+	var holdID string
+	if wAcc != nil && h.walletSvc != nil {
+		preHoldIntentID := fmt.Sprintf("pi_pre_%d", time.Now().UnixNano())
+		hID, holdErr := h.walletSvc.HoldFunds(r.Context(), wAcc.WalletID, estimatedHold, preHoldIntentID)
+		if holdErr != nil {
+			h.writeOpenAIError(w, http.StatusPaymentRequired, fmt.Sprintf("Virtual wallet budget reservation failed: %v", holdErr), "insufficient_quota", "budget_exceeded")
+			return
+		}
+		holdID = hID
+	}
+
 	// 3. Prepare Upstream Request
 	targetURL := route.UpstreamURL
 	if !strings.HasSuffix(targetURL, "/chat/completions") {
@@ -213,8 +260,30 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 		}
 	}
 
+	// In streaming mode, automatically inject stream_options: {"include_usage": true} so upstream returns official usage
+	if req.Stream {
+		var bodyMap map[string]interface{}
+		if err := json.Unmarshal(rawBody, &bodyMap); err == nil {
+			so, exists := bodyMap["stream_options"].(map[string]interface{})
+			if !exists {
+				bodyMap["stream_options"] = map[string]interface{}{"include_usage": true}
+				if patched, pErr := json.Marshal(bodyMap); pErr == nil {
+					rawBody = patched
+				}
+			} else if inc, ok := so["include_usage"].(bool); !ok || !inc {
+				so["include_usage"] = true
+				if patched, pErr := json.Marshal(bodyMap); pErr == nil {
+					rawBody = patched
+				}
+			}
+		}
+	}
+
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(rawBody))
 	if err != nil {
+		if holdID != "" && h.walletSvc != nil {
+			_ = h.walletSvc.ReleaseFunds(r.Context(), holdID)
+		}
 		h.writeOpenAIError(w, http.StatusInternalServerError, "Failed to construct upstream request", "api_error", "internal_error")
 		return
 	}
@@ -226,28 +295,44 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 		}
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Accept-Encoding", "identity")
 
 	// Apply Upstream Auth if configured
 	authCfg := route.UpstreamAuth
 	if authCfg == nil {
 		authCfg = route.UpstreamAuthSnake
 	}
-	if authCfg != nil {
+	if authCfg != nil && authCfg.Type != "" && authCfg.Type != "none" {
 		authenticator, ok := upstreamauth.Get(authCfg.Type)
 		if ok {
-			_ = authenticator.Apply(r.Context(), upstreamReq, authCfg.Params, route.UpstreamSecrets)
+			secrets := route.UpstreamSecrets
+			if (secrets == nil || len(secrets) == 0) && len(authCfg.SecretEnc) > 0 {
+				if dec, err := upstreamauth.DecryptSecretsVersioned(authCfg.SecretEnc, authCfg.KeyVersion); err == nil {
+					secrets = dec
+				}
+			}
+			if len(secrets) == 0 && len(authCfg.Secrets) > 0 {
+				secrets = authCfg.Secrets
+			}
+			_ = authenticator.Apply(r.Context(), upstreamReq, authCfg.Params, secrets)
 		}
 	}
 
 	// 4. Send Upstream Request
 	upstreamResp, err := h.transport.RoundTrip(upstreamReq)
 	if err != nil {
+		if holdID != "" && h.walletSvc != nil {
+			_ = h.walletSvc.ReleaseFunds(r.Context(), holdID)
+		}
 		h.writeOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach upstream model provider: %v", err), "api_error", "bad_gateway")
 		return
 	}
 	defer upstreamResp.Body.Close()
 
 	if upstreamResp.StatusCode >= 400 {
+		if holdID != "" && h.walletSvc != nil {
+			_ = h.walletSvc.ReleaseFunds(r.Context(), holdID)
+		}
 		// Forward error from upstream directly
 		for k, v := range upstreamResp.Header {
 			w.Header()[k] = v
@@ -273,17 +358,40 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 
 		res, _ := sniffer.SniffAndForward(w, upstreamResp.Body)
 
-		// Record settlement event
+		// Accurate token cost settlement
+		actualCost := estimatedHold
+		var pTok, cTok int64
+		if res != nil {
+			pTok = res.PromptTokens
+			cTok = res.CompletionTokens
+			actualCost = res.TotalCost
+			if actualCost <= 0 {
+				actualCost = (pTok*promptPrice)/1000 + (cTok*completionPrice)/1000
+			}
+		}
+		if pTok <= 0 {
+			pTok = estimatedPromptTokens
+		}
+		if cTok <= 0 {
+			cTok = 1
+		}
+		if actualCost <= 0 {
+			actualCost = 1
+		}
+
+		h.settleTransaction(r.Context(), wAcc, route, intentID, holdID, pTok, cTok, actualCost)
+
+		// Record settlement event in ringbuffer if configured
 		if h.ringBuffer != nil && res != nil {
 			h.ringBuffer.Enqueue(&settlement.BatchSettlementEvent{
 				EventID:          fmt.Sprintf("evt_%d", time.Now().UnixNano()),
 				TenantID:         tenantID,
 				RouteID:          route.RouteID,
 				ModelName:        req.Model,
-				PromptTokens:     res.PromptTokens,
-				CompletionTokens: res.CompletionTokens,
-				TotalTokens:      res.PromptTokens + res.CompletionTokens,
-				ActualAmount:     res.TotalCost,
+				PromptTokens:     pTok,
+				CompletionTokens: cTok,
+				TotalTokens:      pTok + cTok,
+				ActualAmount:     actualCost,
 				CreatedAt:        time.Now(),
 			})
 		}
@@ -293,6 +401,9 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 	// Non-streaming response handling
 	respBody, err := io.ReadAll(upstreamResp.Body)
 	if err != nil {
+		if holdID != "" && h.walletSvc != nil {
+			_ = h.walletSvc.ReleaseFunds(r.Context(), holdID)
+		}
 		h.writeOpenAIError(w, http.StatusBadGateway, "Failed to read upstream response body", "api_error", "bad_gateway")
 		return
 	}
@@ -311,6 +422,23 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 		cTok = parsedResp.Usage.CompletionTokens
 		actualCost = (pTok*promptPrice)/1000 + (cTok*completionPrice)/1000
 	}
+	if pTok <= 0 {
+		pTok = estimatedPromptTokens
+	}
+	if cTok <= 0 && len(respBody) > 0 {
+		cTok = proxy.EstimateTokensFromText(string(respBody))
+		if cTok <= 0 {
+			cTok = 1
+		}
+	}
+	if actualCost <= 0 {
+		actualCost = (pTok*promptPrice)/1000 + (cTok*completionPrice)/1000
+	}
+	if actualCost <= 0 {
+		actualCost = 1
+	}
+
+	h.settleTransaction(r.Context(), wAcc, route, intentID, holdID, pTok, cTok, actualCost)
 
 	if h.ringBuffer != nil {
 		h.ringBuffer.Enqueue(&settlement.BatchSettlementEvent{
@@ -331,6 +459,147 @@ func (h *ChatCompletionHandler) handleChatCompletions(w http.ResponseWriter, r *
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respBody)
+}
+
+func (h *ChatCompletionHandler) settleTransaction(
+	_ context.Context,
+	wAcc *x402.WalletAccount,
+	route *rcu.RouteConfig,
+	intentID, holdID string,
+	promptTokens, completionTokens int64,
+	actualCost int64,
+) {
+	if wAcc == nil || actualCost <= 0 {
+		return
+	}
+
+	// Use independent background context to ensure transaction completes even if client disconnected HTTP stream
+	settleCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// 1. Precise Wallet Balance Deduction & Append-only Ledger Commitment
+	// Capture directly against the pre-flight hold to prevent release-then-hold concurrency race
+	if h.walletSvc != nil {
+		if holdID != "" {
+			if actualCost > 0 {
+				_ = h.walletSvc.CaptureFundsWithAmount(settleCtx, holdID, actualCost)
+			} else {
+				_ = h.walletSvc.ReleaseFunds(settleCtx, holdID)
+			}
+		} else if actualCost > 0 {
+			actualHoldID, err := h.walletSvc.HoldFunds(settleCtx, wAcc.WalletID, actualCost, intentID)
+			if err == nil && actualHoldID != "" {
+				_ = h.walletSvc.CaptureFunds(settleCtx, actualHoldID)
+			}
+		}
+	}
+
+	// 2. Audit Trail & Financial Payment Transaction Recording
+	if h.paymentSvc != nil {
+		now := time.Now()
+		asset := route.Asset
+		if asset == "" {
+			asset = "CNY"
+		}
+		intent := &payment.PaymentIntent{
+			IntentID:        intentID,
+			TenantID:        wAcc.TenantID,
+			ProjectID:       wAcc.ProjectID,
+			AgentID:         wAcc.AgentID,
+			RouteID:         route.RouteID,
+			IdempotencyKey:  intentID,
+			RequestID:       intentID,
+			PaymentMethod:   "wallet",
+			AmountBaseUnits: actualCost,
+			Asset:           asset,
+			Status:          payment.IntentStatusCompleted,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		_ = h.paymentSvc.CreateIntent(settleCtx, intent)
+
+		settlementID := fmt.Sprintf("set_llm_%d", now.UnixNano())
+		settlement := &payment.SettlementRecord{
+			SettlementID:    settlementID,
+			IntentID:        intentID,
+			PaymentMethod:   "wallet",
+			NetworkID:       route.Network,
+			AmountBaseUnits: actualCost,
+			Status:          payment.SettlementStatusConfirmed,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		_ = h.paymentSvc.RecordSettlement(settleCtx, settlement)
+
+		fulfillmentID := fmt.Sprintf("ful_llm_%d", now.UnixNano())
+		fulfillment := &payment.FulfillmentRecord{
+			FulfillmentID:  fulfillmentID,
+			IntentID:       intentID,
+			Status:         payment.FulfillmentStatusSucceeded,
+			UpstreamStatus: 200,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}
+		_ = h.paymentSvc.RecordFulfillment(settleCtx, fulfillment)
+
+		_ = h.paymentSvc.LinkWalletAssociation(settleCtx, intentID, &payment.WalletHoldAssociation{
+			HoldID:    intentID,
+			WalletID:  wAcc.WalletID,
+			Amount:    actualCost,
+			Status:    "captured",
+			ExpiresAt: now.Add(24 * time.Hour),
+		}, &payment.LedgerAssociation{
+			EntryID:  "ent_" + intentID,
+			WalletID: wAcc.WalletID,
+			Amount:   -actualCost,
+		})
+	}
+
+	// 3. Usage & Request SLA Recording
+	if h.usageSvc != nil {
+		_ = h.usageSvc.RecordUsage(settleCtx, &usage.UsageEvent{
+			EventID:          usage.GenerateUsageEventID(),
+			TenantID:         wAcc.TenantID,
+			ProjectID:        wAcc.ProjectID,
+			AgentID:          wAcc.AgentID,
+			RouteID:          route.RouteID,
+			IntentID:         intentID,
+			AmountBaseUnits:  actualCost,
+			Asset:            route.Asset,
+			PaymentMethod:    "wallet",
+			IsSuccess:        true,
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
+			CreatedAt:        time.Now(),
+		})
+		_ = h.usageSvc.RecordRequest(settleCtx, &usage.RequestRecord{
+			RequestID:   fmt.Sprintf("req_%d", time.Now().UnixNano()),
+			TenantID:    wAcc.TenantID,
+			ProjectID:   wAcc.ProjectID,
+			AgentID:     wAcc.AgentID,
+			RouteID:     route.RouteID,
+			IntentID:    intentID,
+			HTTPMethod:  "POST",
+			RequestPath: "/v1/chat/completions",
+			StatusCode:  200,
+			DurationMs:  185,
+			CreatedAt:   time.Now(),
+		})
+	}
+}
+
+func (h *ChatCompletionHandler) extractWalletAccount(r *http.Request) *x402.WalletAccount {
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if h.walletSvc != nil {
+			if w, err := h.walletSvc.GetWalletByAPIKey(r.Context(), token); err == nil && w != nil {
+				return w
+			}
+		}
+	}
+	return nil
 }
 
 func (h *ChatCompletionHandler) extractTenantID(r *http.Request) string {

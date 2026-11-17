@@ -1,6 +1,7 @@
 package x402
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -91,28 +92,55 @@ func (s *reqScope) recordReq(
 }
 
 func (s *reqScope) recordUsage(tenantID, projectID, agentID, intentID, paymentMethod string, isSuccess bool) {
+	s.recordUsageWithTokens(tenantID, projectID, agentID, intentID, paymentMethod, isSuccess, 0, 0, 0)
+}
+
+func (s *reqScope) recordUsageWithTokens(tenantID, projectID, agentID, intentID, paymentMethod string, isSuccess bool, promptTokens, completionTokens, totalTokens int64) {
 	if s.p.usageService == nil {
 		return
 	}
 	tID, pID := s.scopeIDs(tenantID, projectID)
+	if totalTokens <= 0 && (promptTokens > 0 || completionTokens > 0) {
+		totalTokens = promptTokens + completionTokens
+	}
 	err := s.p.usageService.RecordUsage(s.r.Context(), &usage.UsageEvent{
-		EventID:         usage.GenerateUsageEventID(),
-		TenantID:        tID,
-		ProjectID:       pID,
-		AgentID:         agentID,
-		RouteID:         s.route.RouteID,
-		IntentID:        intentID,
-		AmountBaseUnits: s.route.PriceBaseUnits,
-		Asset:           s.route.Asset,
-		PaymentMethod:   paymentMethod,
-		IsSuccess:       isSuccess,
-		CreatedAt:       time.Now(),
+		EventID:          usage.GenerateUsageEventID(),
+		TenantID:         tID,
+		ProjectID:        pID,
+		AgentID:          agentID,
+		RouteID:          s.route.RouteID,
+		IntentID:         intentID,
+		AmountBaseUnits:  s.route.PriceBaseUnits,
+		Asset:            s.route.Asset,
+		PaymentMethod:    paymentMethod,
+		IsSuccess:        isSuccess,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      totalTokens,
+		CreatedAt:        time.Now(),
 	})
 	if err != nil {
 		slog.Error("failed to record usage event",
 			slog.String("request_id", s.requestID),
 			slog.String("intent_id", intentID), slog.Any("error", err))
 	}
+}
+
+func extractTokensFromResponse(body []byte) (promptTokens, completionTokens, totalTokens int64) {
+	if len(body) == 0 {
+		return 0, 0, 0
+	}
+	var u struct {
+		Usage struct {
+			PromptTokens     int64 `json:"prompt_tokens"`
+			CompletionTokens int64 `json:"completion_tokens"`
+			TotalTokens      int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &u); err == nil && u.Usage.TotalTokens > 0 {
+		return u.Usage.PromptTokens, u.Usage.CompletionTokens, u.Usage.TotalTokens
+	}
+	return 0, 0, 0
 }
 
 func (s *reqScope) initIntent(tenantID, projectID, agentID, intentID, idemKey, paymentMethod, status string) {

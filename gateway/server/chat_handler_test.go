@@ -3,14 +3,17 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/rcu"
 	"github.com/open-agentpay/agent-core-sdk/gateway/settlement"
+	"github.com/open-agentpay/agent-core-sdk/gateway/wallet"
 )
 
 func TestChatCompletionHandler_ListModels(t *testing.T) {
@@ -137,6 +140,7 @@ func TestChatCompletionHandler_StreamingForward(t *testing.T) {
 				Status:                        "active",
 				UpstreamURL:                   "https://api.deepseek.com/v1",
 				AllowedPaymentMethods:         "wallet",
+				IsPublic:                      true,
 			},
 		},
 	}
@@ -227,6 +231,7 @@ func TestChatCompletionHandler_NonStreaming(t *testing.T) {
 				Status:                        "active",
 				UpstreamURL:                   "https://api.deepseek.com/v1",
 				AllowedPaymentMethods:         "wallet",
+				IsPublic:                      true,
 			},
 		},
 	}
@@ -295,5 +300,101 @@ func TestChatCompletionHandler_ModelNotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected HTTP 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestChatCompletionHandler_StreamOptionsInjectionAndWalletSettlement(t *testing.T) {
+	var upstreamReceivedBody []byte
+	mockTransport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(req.Body)
+		upstreamReceivedBody = b
+
+		rec := httptest.NewRecorder()
+		rec.Header().Set("Content-Type", "text/event-stream")
+		rec.WriteHeader(http.StatusOK)
+		ssePayload := "data: {\"choices\":[{\"delta\":{\"content\":\"Hello world\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"total_tokens\":30}}\n\ndata: [DONE]\n\n"
+		_, _ = rec.Write([]byte(ssePayload))
+		return rec.Result(), nil
+	})
+
+	snap := &rcu.ConfigSnapshot{
+		SchemaVersion: "2.0.0",
+		TenantID:      "ten_01",
+		VersionID:     "ver_1",
+		VersionNumber: 1,
+		Routes: []rcu.RouteConfig{
+			{
+				RouteID:                       "rt_gpt",
+				TenantID:                      "ten_01",
+				RouteType:                     "llm",
+				ModelName:                     "gpt-4o",
+				PathPattern:                   "/models/gpt-4o",
+				PricingType:                   "per_token",
+				PromptTokenPriceBaseUnits:     1000,
+				CompletionTokenPriceBaseUnits: 2000,
+				Status:                        "active",
+				UpstreamURL:                   "https://api.openai.com/v1",
+				AllowedPaymentMethods:         "wallet",
+				IsPublic:                      true,
+			},
+		},
+	}
+	rcuMgr, _ := rcu.NewManager(snap)
+
+	walletSvc := wallet.NewMemoryService()
+	walletID := "wlt_test_llm"
+	w := &wallet.Wallet{
+		WalletID:       walletID,
+		TenantID:       "ten_01",
+		Asset:          "CNY",
+		Status:         wallet.StatusActive,
+		Version:        1,
+		AvailableCache: 1000000,
+		HeldCache:      0,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	walletSvc.RegisterWallet(w)
+	apiKey := "apk_test_secret"
+	walletSvc.RegisterAPIKey(apiKey, "ten_01", "prj_01")
+
+	handler := NewChatCompletionHandler(ChatHandlerConfig{
+		RCUMgr:    rcuMgr,
+		Metrics:   metrics.New(),
+		WalletSvc: walletSvc,
+		Transport: mockTransport,
+	})
+
+	reqBody := `{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hi"}], "stream": true}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 1. Verify upstream received stream_options: {"include_usage": true}
+	var upstreamJSON map[string]interface{}
+	if err := json.Unmarshal(upstreamReceivedBody, &upstreamJSON); err != nil {
+		t.Fatalf("failed to parse upstream body: %v", err)
+	}
+	streamOpts, ok := upstreamJSON["stream_options"].(map[string]interface{})
+	if !ok || streamOpts["include_usage"] != true {
+		t.Fatalf("expected stream_options.include_usage=true, got: %v", upstreamJSON["stream_options"])
+	}
+
+	// 2. Verify wallet balance was atomically settled via CaptureFundsWithAmount (held returned to 0)
+	walletAfter, _ := walletSvc.GetWallet(context.Background(), walletID)
+	if walletAfter.HeldCache != 0 {
+		t.Fatalf("expected held_cache=0, got %d", walletAfter.HeldCache)
+	}
+	// actualCost: (10 prompt * 1000)/1000 + (20 completion * 2000)/1000 = 10 + 40 = 50
+	expectedAvailable := int64(1000000 - 50)
+	if walletAfter.AvailableCache != expectedAvailable {
+		t.Fatalf("expected available_cache=%d, got %d", expectedAvailable, walletAfter.AvailableCache)
 	}
 }

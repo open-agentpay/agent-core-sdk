@@ -77,6 +77,13 @@ type RouteConfig struct {
 	CompletionTokenPriceSnake int64                        `json:"completion_token_price_base_units,omitempty"`
 	ModelMetadata         map[string]interface{}           `json:"modelMetadata,omitempty"`
 	ModelMetadataSnake    map[string]interface{}           `json:"model_metadata,omitempty"`
+	IsPublic              bool                             `json:"isPublic,omitempty"`
+	IsPublicSnake         bool                             `json:"is_public,omitempty"`
+}
+
+// Public returns whether the route is publicly listed on marketplace.
+func (r *RouteConfig) Public() bool {
+	return r.IsPublic || r.IsPublicSnake
 }
 
 // TrialAllowed returns whether the route allows trial guest keys.
@@ -824,7 +831,7 @@ func (m *Manager) GetLLMRouteForTenant(tenantID, modelName string) (*RouteConfig
 			if expected == "" {
 				expected = snap.TenantID
 			}
-			if tenantID == "" || expected == "" || expected == tenantID {
+			if r.Public() || tenantID == "" || expected == "" || expected == tenantID {
 				pol := snap.findPolicyForRoute(r.RouteID)
 				return r, pol, snap, true
 			}
@@ -851,7 +858,7 @@ func (m *Manager) ListLLMModelsForTenant(tenantID string) []*RouteConfig {
 			if expected == "" {
 				expected = snap.TenantID
 			}
-			if tenantID == "" || expected == "" || expected == tenantID {
+			if r.Public() || tenantID == "" || expected == "" || expected == tenantID {
 				res = append(res, r)
 			}
 		}

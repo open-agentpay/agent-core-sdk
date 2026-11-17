@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-agentpay/agent-core-sdk/gateway/admin"
 	"github.com/open-agentpay/agent-core-sdk/gateway/agent"
+	"github.com/open-agentpay/agent-core-sdk/gateway/httputil"
 	"github.com/open-agentpay/agent-core-sdk/gateway/idempotency"
 	"github.com/open-agentpay/agent-core-sdk/gateway/metrics"
 	"github.com/open-agentpay/agent-core-sdk/gateway/payment"
@@ -519,9 +520,7 @@ func extractAPIKey(r *http.Request) string {
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data)
+	httputil.WriteJSON(w, status, data)
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, status int, code, msg, nextAction string) {

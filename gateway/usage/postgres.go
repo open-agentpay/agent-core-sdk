@@ -18,6 +18,13 @@ type PostgresService struct {
 
 // NewPostgresService creates an initialized PostgresService.
 func NewPostgresService(db *sql.DB) *PostgresService {
+	if db != nil {
+		_, _ = db.Exec(`
+			ALTER TABLE ap_usage_event ADD COLUMN IF NOT EXISTS prompt_tokens BIGINT NOT NULL DEFAULT 0;
+			ALTER TABLE ap_usage_event ADD COLUMN IF NOT EXISTS completion_tokens BIGINT NOT NULL DEFAULT 0;
+			ALTER TABLE ap_usage_event ADD COLUMN IF NOT EXISTS total_tokens BIGINT NOT NULL DEFAULT 0;
+		`)
+	}
 	return &PostgresService{db: db}
 }
 
@@ -81,11 +88,16 @@ func (p *PostgresService) RecordUsage(ctx context.Context, event *UsageEvent) er
 		event.CreatedAt = time.Now()
 	}
 
+	if event.TotalTokens == 0 && (event.PromptTokens > 0 || event.CompletionTokens > 0) {
+		event.TotalTokens = event.PromptTokens + event.CompletionTokens
+	}
+
 	query := `
 		INSERT INTO ap_usage_event (
 			event_id, tenant_id, project_id, agent_id, route_id, intent_id,
-			amount_base_units, asset, payment_method, is_success, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			amount_base_units, asset, payment_method, is_success,
+			prompt_tokens, completion_tokens, total_tokens, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (event_id) DO NOTHING;
 	`
 
@@ -104,6 +116,9 @@ func (p *PostgresService) RecordUsage(ctx context.Context, event *UsageEvent) er
 		event.Asset,
 		event.PaymentMethod,
 		event.IsSuccess,
+		event.PromptTokens,
+		event.CompletionTokens,
+		event.TotalTokens,
 		event.CreatedAt,
 	)
 	return err
@@ -327,7 +342,8 @@ func (p *PostgresService) ListUsageEvents(ctx context.Context, filter UsageFilte
 
 	dataQuery := fmt.Sprintf(`
 		SELECT event_id, tenant_id, project_id, agent_id, route_id, intent_id,
-		       amount_base_units, asset, payment_method, is_success, created_at
+		       amount_base_units, asset, payment_method, is_success,
+		       prompt_tokens, completion_tokens, total_tokens, created_at
 		FROM ap_usage_event
 		%s
 		ORDER BY created_at DESC
@@ -359,6 +375,9 @@ func (p *PostgresService) ListUsageEvents(ctx context.Context, filter UsageFilte
 			&evt.Asset,
 			&evt.PaymentMethod,
 			&evt.IsSuccess,
+			&evt.PromptTokens,
+			&evt.CompletionTokens,
+			&evt.TotalTokens,
 			&evt.CreatedAt,
 		)
 		if err != nil {
@@ -448,7 +467,8 @@ func (p *PostgresService) GetRequestRecord(ctx context.Context, tenantID, reques
 func (p *PostgresService) GetUsageEvent(ctx context.Context, tenantID, eventID string) (*UsageEvent, error) {
 	query := `
 		SELECT event_id, tenant_id, project_id, agent_id, route_id, intent_id,
-		       amount_base_units, asset, payment_method, is_success, created_at
+		       amount_base_units, asset, payment_method, is_success,
+		       prompt_tokens, completion_tokens, total_tokens, created_at
 		FROM ap_usage_event
 		WHERE event_id = $1
 		LIMIT 1;
@@ -469,6 +489,9 @@ func (p *PostgresService) GetUsageEvent(ctx context.Context, tenantID, eventID s
 		&evt.Asset,
 		&evt.PaymentMethod,
 		&evt.IsSuccess,
+		&evt.PromptTokens,
+		&evt.CompletionTokens,
+		&evt.TotalTokens,
 		&evt.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
