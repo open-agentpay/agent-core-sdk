@@ -295,7 +295,6 @@ func (p *PaymentProcessor) issueOnChainChallenge(
 	intentID := "pi_" + ch.ChallengeID
 	// Keep Idempotency-Key off the provisional challenged intent so the retry can bind it cleanly.
 	sc.initIntent(route.TenantID, defaultProjectID, "", intentID, "", "onchain", payment.IntentStatusChallenged)
-	sc.recordReq(route.TenantID, defaultProjectID, "", "", intentID, http.StatusPaymentRequired, ErrCodePaymentRequired, false)
 	p.metrics.IncChallenges()
 	encodedChallenge, err := EncodeChallenge(ch, true)
 	if err != nil {

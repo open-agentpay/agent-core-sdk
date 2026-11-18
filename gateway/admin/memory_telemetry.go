@@ -141,13 +141,22 @@ func (s *MemoryService) GetRouteTelemetryOverview(ctx context.Context, tenantID,
 	}
 
 	allLatencies := make([]int64, 0, len(reqRecords))
-	var totalCalls, totalSuccess int64
+	var totalCalls, totalSuccess, totalBlocked, totalUpErr int64
 
 	for _, req := range reqRecords {
 		totalCalls++
 		isOk := req.StatusCode >= 200 && req.StatusCode < 400
+		isBlocked := req.StatusCode >= 400 && req.StatusCode < 500
+		isUpErr := req.StatusCode >= 500
+
 		if isOk {
 			totalSuccess++
+		}
+		if isBlocked {
+			totalBlocked++
+		}
+		if isUpErr {
+			totalUpErr++
 		}
 		allLatencies = append(allLatencies, req.DurationMs)
 
@@ -164,6 +173,15 @@ func (s *MemoryService) GetRouteTelemetryOverview(ctx context.Context, tenantID,
 			routeItemsMap[req.RouteID] = item
 		}
 		item.Calls++
+		if isOk {
+			item.SuccessCalls++
+		}
+		if isBlocked {
+			item.BlockedCalls++
+		}
+		if isUpErr {
+			item.UpstreamErrorCalls++
+		}
 		routeLatencies[req.RouteID] = append(routeLatencies[req.RouteID], req.DurationMs)
 	}
 
@@ -236,14 +254,17 @@ func (s *MemoryService) GetRouteTelemetryOverview(ctx context.Context, tenantID,
 		TimeRange: normRange,
 		ProjectID: projectID,
 		Summary: RouteTelemetrySummary{
-			TotalCalls:       totalCalls,
-			SuccessRate:      overallSuccessRate,
-			AvgDurationMs:    avgDuration,
-			P95DurationMs:    p95Duration,
-			TotalTokens:      totTok,
-			PromptTokens:     promptTok,
-			CompletionTokens: compTok,
-			FailedCalls:      totalCalls - totalSuccess,
+			TotalCalls:         totalCalls,
+			SuccessCalls:       totalSuccess,
+			BlockedCalls:       totalBlocked,
+			UpstreamErrorCalls: totalUpErr,
+			SuccessRate:        overallSuccessRate,
+			AvgDurationMs:      avgDuration,
+			P95DurationMs:      p95Duration,
+			TotalTokens:        totTok,
+			PromptTokens:       promptTok,
+			CompletionTokens:   compTok,
+			FailedCalls:        totalCalls - totalSuccess,
 		},
 		Routes:   routeList,
 		CachedAt: time.Now().Unix(),

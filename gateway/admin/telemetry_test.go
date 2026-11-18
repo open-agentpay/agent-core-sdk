@@ -124,8 +124,17 @@ func TestGetRouteTelemetryOverview(t *testing.T) {
 	if resp.Summary.TotalCalls != 4 {
 		t.Errorf("expected 4 total calls, got %d", resp.Summary.TotalCalls)
 	}
+	if resp.Summary.SuccessCalls != 3 {
+		t.Errorf("expected 3 success calls, got %d", resp.Summary.SuccessCalls)
+	}
 	if resp.Summary.FailedCalls != 1 {
 		t.Errorf("expected 1 failed call, got %d", resp.Summary.FailedCalls)
+	}
+	if resp.Summary.UpstreamErrorCalls != 1 {
+		t.Errorf("expected 1 upstream error call, got %d", resp.Summary.UpstreamErrorCalls)
+	}
+	if resp.Summary.BlockedCalls != 0 {
+		t.Errorf("expected 0 blocked calls, got %d", resp.Summary.BlockedCalls)
 	}
 	// 3 success out of 4 = 75.0%
 	if resp.Summary.SuccessRate != 75.0 {

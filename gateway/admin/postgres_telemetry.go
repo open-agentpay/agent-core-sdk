@@ -149,6 +149,8 @@ func (p *PostgresService) GetRouteTelemetryOverview(ctx context.Context, tenantI
 			SELECT route_id,
 			       COUNT(*) as total_calls,
 			       COUNT(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 END) as success_calls,
+			       COUNT(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 END) as blocked_calls,
+			       COUNT(CASE WHEN status_code >= 500 THEN 1 END) as upstream_error_calls,
 			       COALESCE(AVG(duration_ms)::bigint, 0) as avg_duration,
 			       COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)::bigint, 0) as p95_duration
 			FROM ap_request_record
@@ -161,6 +163,8 @@ func (p *PostgresService) GetRouteTelemetryOverview(ctx context.Context, tenantI
 			SELECT route_id,
 			       COUNT(*) as total_calls,
 			       COUNT(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 END) as success_calls,
+			       COUNT(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 END) as blocked_calls,
+			       COUNT(CASE WHEN status_code >= 500 THEN 1 END) as upstream_error_calls,
 			       COALESCE(AVG(duration_ms)::bigint, 0) as avg_duration,
 			       COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)::bigint, 0) as p95_duration
 			FROM ap_request_record
@@ -175,8 +179,8 @@ func (p *PostgresService) GetRouteTelemetryOverview(ctx context.Context, tenantI
 		defer reqRows.Close()
 		for reqRows.Next() {
 			var rID string
-			var calls, succ, avgD, p95D int64
-			if err := reqRows.Scan(&rID, &calls, &succ, &avgD, &p95D); err == nil {
+			var calls, succ, blocked, upErr, avgD, p95D int64
+			if err := reqRows.Scan(&rID, &calls, &succ, &blocked, &upErr, &avgD, &p95D); err == nil {
 				item, exists := routeItemsMap[rID]
 				if !exists {
 					item = &RouteTelemetryItem{
@@ -189,6 +193,9 @@ func (p *PostgresService) GetRouteTelemetryOverview(ctx context.Context, tenantI
 					routeItemsMap[rID] = item
 				}
 				item.Calls = calls
+				item.SuccessCalls = succ
+				item.BlockedCalls = blocked
+				item.UpstreamErrorCalls = upErr
 				item.AvgDurationMs = avgD
 				item.P95DurationMs = p95D
 				if calls > 0 {
@@ -281,6 +288,8 @@ func (p *PostgresService) GetRouteTelemetryOverview(ctx context.Context, tenantI
 	routeList := make([]*RouteTelemetryItem, 0, len(routeItemsMap))
 	var summary RouteTelemetrySummary
 	var totalSuccCalls int64
+	var totalBlockedCalls int64
+	var totalUpstreamErrorCalls int64
 	var sumDurationTotal int64
 
 	for _, item := range routeItemsMap {
@@ -292,8 +301,9 @@ func (p *PostgresService) GetRouteTelemetryOverview(ctx context.Context, tenantI
 		summary.CompletionTokens += item.CompletionTokens
 		sumDurationTotal += (item.AvgDurationMs * item.Calls)
 
-		succForRoute := int64(float64(item.Calls) * (item.SuccessRate / 100.0))
-		totalSuccCalls += succForRoute
+		totalSuccCalls += item.SuccessCalls
+		totalBlockedCalls += item.BlockedCalls
+		totalUpstreamErrorCalls += item.UpstreamErrorCalls
 	}
 
 	sort.Slice(routeList, func(i, j int) bool {
@@ -303,6 +313,9 @@ func (p *PostgresService) GetRouteTelemetryOverview(ctx context.Context, tenantI
 	if summary.TotalCalls > 0 {
 		summary.SuccessRate = float64(int((float64(totalSuccCalls)/float64(summary.TotalCalls))*1000)) / 10.0
 		summary.AvgDurationMs = sumDurationTotal / summary.TotalCalls
+		summary.SuccessCalls = totalSuccCalls
+		summary.BlockedCalls = totalBlockedCalls
+		summary.UpstreamErrorCalls = totalUpstreamErrorCalls
 		summary.FailedCalls = summary.TotalCalls - totalSuccCalls
 		if len(routeList) > 0 {
 			summary.P95DurationMs = routeList[0].P95DurationMs
