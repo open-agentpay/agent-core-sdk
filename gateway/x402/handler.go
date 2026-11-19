@@ -59,8 +59,16 @@ type PaymentProcessor struct {
 	paymentService     payment.Service
 	settlementDefaults SettlementDefaults
 	assetResolver      AssetResolver
+	priceCalculator    PriceCalculator
+	issuedChallengesMu sync.RWMutex
+	issuedChallenges   map[string]*issuedChallengeEntry
 	externalStlMu      sync.RWMutex
 	externalStlIDs     map[string]string
+}
+
+type issuedChallengeEntry struct {
+	challenge *PaymentChallenge
+	expiresAt time.Time
 }
 
 // NewPaymentProcessor creates an initialized PaymentProcessor with full safety defaults.
@@ -113,6 +121,50 @@ func (p *PaymentProcessor) SetSettlementDefaults(d SettlementDefaults) { p.settl
 func (p *PaymentProcessor) GetSettlementDefaults() SettlementDefaults { return p.settlementDefaults }
 func (p *PaymentProcessor) SetAssetResolver(r AssetResolver)          { p.assetResolver = r }
 func (p *PaymentProcessor) GetAssetResolver() AssetResolver           { return p.assetResolver }
+func (p *PaymentProcessor) SetPriceCalculator(calc PriceCalculator)   { p.priceCalculator = calc }
+func (p *PaymentProcessor) GetPriceCalculator() PriceCalculator       { return p.priceCalculator }
+
+func (p *PaymentProcessor) recordIssuedChallenge(ch *PaymentChallenge) {
+	if ch == nil || ch.ChallengeID == "" {
+		return
+	}
+	p.issuedChallengesMu.Lock()
+	defer p.issuedChallengesMu.Unlock()
+	if p.issuedChallenges == nil {
+		p.issuedChallenges = make(map[string]*issuedChallengeEntry)
+	}
+	now := time.Now()
+	if len(p.issuedChallenges) > 1000 {
+		for id, entry := range p.issuedChallenges {
+			if now.After(entry.expiresAt) {
+				delete(p.issuedChallenges, id)
+			}
+		}
+	}
+	p.issuedChallenges[ch.ChallengeID] = &issuedChallengeEntry{
+		challenge: ch,
+		expiresAt: now.Add(15 * time.Minute),
+	}
+}
+
+func (p *PaymentProcessor) getIssuedChallenge(challengeID string) *PaymentChallenge {
+	if challengeID == "" {
+		return nil
+	}
+	p.issuedChallengesMu.RLock()
+	defer p.issuedChallengesMu.RUnlock()
+	if p.issuedChallenges == nil {
+		return nil
+	}
+	entry, ok := p.issuedChallenges[challengeID]
+	if !ok || entry == nil {
+		return nil
+	}
+	if time.Now().After(entry.expiresAt) {
+		return nil
+	}
+	return entry.challenge
+}
 func (p *PaymentProcessor) SetUsageService(svc usage.Service)         { if svc != nil { p.usageService = svc } }
 func (p *PaymentProcessor) GetUsageService() usage.Service            { return p.usageService }
 func (p *PaymentProcessor) SetAgentRegistry(reg *agent.Registry)      { if reg != nil { p.agentRegistry = reg } }

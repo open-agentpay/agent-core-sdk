@@ -144,8 +144,13 @@ func (o onchainParams) verifyChallenge(auth *PaymentAuthorization) *PaymentChall
 
 // newChallenge issues a fresh 402 challenge.
 func (o onchainParams) newChallenge(resourcePath string, ttl time.Duration) *PaymentChallenge {
+	return o.newChallengeWithPrice(resourcePath, ttl, o.Price)
+}
+
+// newChallengeWithPrice issues a fresh 402 challenge with an explicit price (e.g. including dynamic gas surcharge).
+func (o onchainParams) newChallengeWithPrice(resourcePath string, ttl time.Duration, price int64) *PaymentChallenge {
 	ch := NewChallenge(o.Network, o.Contract, o.Symbol, o.Decimals,
-		fmt.Sprintf("%d", o.Price), o.Payee, "", resourcePath, ttl)
+		fmt.Sprintf("%d", price), o.Payee, "", resourcePath, ttl)
 	ch.Scheme = TransferAuthorizationScheme
 	return ch
 }

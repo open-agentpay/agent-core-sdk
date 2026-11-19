@@ -4,6 +4,7 @@ package x402
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -172,6 +173,11 @@ func (s SignatureData) MarshalJSON() ([]byte, error) {
 		return json.Marshal(s.rawString)
 	}
 	return []byte(`""`), nil
+}
+
+// PriceCalculator dynamically calculates total challenge amount (e.g. base amount + gas surcharge).
+type PriceCalculator interface {
+	CalculatePrice(ctx context.Context, network, asset string, basePrice int64) (totalAmount int64, breakdown map[string]interface{}, err error)
 }
 
 // PaymentAuthorization represents the buyer's signed payment authorization payload.

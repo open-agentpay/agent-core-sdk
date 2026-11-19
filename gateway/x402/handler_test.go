@@ -91,6 +91,65 @@ func TestUnauthenticatedIssues402Challenge(t *testing.T) {
 	}
 }
 
+type mockTestPriceCalculator struct {
+	total     int64
+	breakdown map[string]interface{}
+}
+
+func (m *mockTestPriceCalculator) CalculatePrice(ctx context.Context, network, asset string, basePrice int64) (int64, map[string]interface{}, error) {
+	return m.total, m.breakdown, nil
+}
+
+func TestPriceCalculatorDynamicSurchargeChallenge(t *testing.T) {
+	processor, _ := setupTestProcessor(nil, nil, nil)
+	processor.SetPriceCalculator(&mockTestPriceCalculator{
+		total: 100500,
+		breakdown: map[string]interface{}{
+			"base_amount":   int64(100000),
+			"gas_surcharge": int64(500),
+			"total_amount":  int64(100500),
+			"gas_mode":      "dynamic_surcharge",
+		},
+	})
+
+	route := &rcu.RouteConfig{
+		RouteID:               "rou_market",
+		PriceBaseUnits:        100000,
+		Asset:                 "USDC",
+		PayeeAddress:          "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+		AllowedPaymentMethods: "onchain",
+	}
+
+	req := httptest.NewRequest("GET", "/v1/market-data", nil)
+	w := httptest.NewRecorder()
+
+	processor.HandleRequest(w, req, route, "req_gas_001")
+
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected status 402, got %d", w.Code)
+	}
+
+	chHeader := w.Header().Get(HeaderPaymentRequired)
+	if chHeader == "" {
+		t.Fatalf("missing %s response header", HeaderPaymentRequired)
+	}
+
+	ch, err := DecodeChallenge(chHeader)
+	if err != nil {
+		t.Fatalf("failed to decode challenge: %v", err)
+	}
+	if ch.Amount != "100500" {
+		t.Errorf("expected challenge amount 100500 with gas surcharge, got %s", ch.Amount)
+	}
+	if ch.Extensions == nil || ch.Extensions["pricing"] == nil {
+		t.Fatalf("expected challenge pricing extension to be present")
+	}
+	pricing, ok := ch.Extensions["pricing"].(map[string]interface{})
+	if !ok || pricing["gas_mode"] != "dynamic_surcharge" {
+		t.Errorf("pricing extension mismatch: %+v", pricing)
+	}
+}
+
 func TestWalletPaymentSuccessAndAccounting(t *testing.T) {
 	walletSvc := NewMemoryWalletService()
 	walletSvc.RegisterWallet("apk_live_valid123", &WalletAccount{

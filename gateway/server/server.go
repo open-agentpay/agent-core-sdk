@@ -64,6 +64,7 @@ type ServerOptions struct {
 	AssetResolver      x402.AssetResolver
 	PolicyEvaluator    agent.PolicyEvaluator
 	SpendRecorder      agent.SpendRecorder
+	PriceCalculator    x402.PriceCalculator
 	ExtraRoutes        map[string]http.Handler
 	TenantSubresources map[string]http.Handler
 }
@@ -111,6 +112,11 @@ func WithSettlementAdapter(a settlement.SettlementAdapter) Option {
 // WithAssetResolver provides a custom AssetResolver implementation.
 func WithAssetResolver(r x402.AssetResolver) Option {
 	return func(o *ServerOptions) { o.AssetResolver = r }
+}
+
+// WithPriceCalculator provides a custom dynamic PriceCalculator implementation.
+func WithPriceCalculator(c x402.PriceCalculator) Option {
+	return func(o *ServerOptions) { o.PriceCalculator = c }
 }
 
 // WithWalletService provides an explicit wallet service implementation.
@@ -277,6 +283,9 @@ func NewWithOptions(
 	processor := x402.NewPaymentProcessor(verifier, nonceStore, walletSvc, proxyHandler, m)
 	if opts.AssetResolver != nil {
 		processor.SetAssetResolver(opts.AssetResolver)
+	}
+	if opts.PriceCalculator != nil {
+		processor.SetPriceCalculator(opts.PriceCalculator)
 	}
 	if opts.PolicyEvaluator != nil {
 		processor.SetPolicyEvaluator(opts.PolicyEvaluator)

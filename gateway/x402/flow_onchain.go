@@ -9,6 +9,7 @@ import (
 	"github.com/open-agentpay/agent-core-sdk/gateway/recovery"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -20,7 +21,7 @@ func (p *PaymentProcessor) verifyOnChainPaymentAndNonce(
 	oc onchainParams,
 	auth *PaymentAuthorization,
 	intentID, settlementID, idemKey, idemTenantID string,
-) (*VerificationResult, bool) {
+) (*VerificationResult, int64, bool) {
 	releaseIdemLock := func() {
 		if idemTenantID != "" && idemKey != "" {
 			_ = p.idempotencyStore.ReleaseLock(r.Context(), idemTenantID, idemKey)
@@ -38,10 +39,23 @@ func (p *PaymentProcessor) verifyOnChainPaymentAndNonce(
 			"nonce": auth.Nonce,
 			"payer": auth.Payer,
 		})
-		return nil, false
+		return nil, 0, false
 	}
 
-	ch := oc.verifyChallenge(auth)
+	var ch *PaymentChallenge
+	if auth.ChallengeID != "" {
+		ch = p.getIssuedChallenge(auth.ChallengeID)
+	}
+	if ch == nil {
+		ch = oc.verifyChallenge(auth)
+	}
+	effectivePrice := oc.Price
+	if ch != nil {
+		if cp, err := strconv.ParseInt(ch.Amount, 10, 64); err == nil && cp > 0 {
+			effectivePrice = cp
+		}
+	}
+
 	result, err := p.verifier.VerifyPayment(r.Context(), ch, auth)
 	if err != nil || result == nil || !result.Valid {
 		releaseIdemLock()
@@ -64,13 +78,13 @@ func (p *PaymentProcessor) verifyOnChainPaymentAndNonce(
 		WriteProtocolError(w, errCode, sc.requestID, map[string]interface{}{
 			"reason": reason,
 		})
-		return nil, false
+		return nil, 0, false
 	}
 
 	sc.initIntent(route.TenantID, defaultProjectID, "", intentID, idemKey, "onchain", payment.IntentStatusAuthorized)
 	sc.initSettlement(settlementID, intentID, "onchain", payment.SettlementStatusSubmitted, auth.Payer, route.PayeeAddress, auth.Nonce, "")
 	sc.initFulfillment(fmt.Sprintf("ful_%s", sc.requestID), intentID)
-	return result, true
+	return result, effectivePrice, true
 }
 
 func (p *PaymentProcessor) handleOnChainPayment(
@@ -162,7 +176,7 @@ func (p *PaymentProcessor) handleOnChainPayment(
 		}
 
 		// ResultNew: Validate Nonce & Signature
-		result, ok := p.verifyOnChainPaymentAndNonce(w, r, route, sc, oc, auth, intentID, settlementID, idemKey, tenantID)
+		result, effectivePrice, ok := p.verifyOnChainPaymentAndNonce(w, r, route, sc, oc, auth, intentID, settlementID, idemKey, tenantID)
 		if !ok {
 			return
 		}
@@ -173,7 +187,7 @@ func (p *PaymentProcessor) handleOnChainPayment(
 			PaymentIntentID: intentID,
 			PaymentMethod:   "onchain",
 			Payer:           auth.Payer,
-			Amount:          oc.Price,
+			Amount:          effectivePrice,
 			Asset:           oc.Asset,
 			Network:         oc.Network,
 			TxHashOrNonce:   auth.Nonce,
@@ -185,7 +199,7 @@ func (p *PaymentProcessor) handleOnChainPayment(
 		asyncSettle := p.resolveAsyncVerifier() != nil && result.VerificationToken != ""
 		pCtx := &proxy.PaymentContext{
 			PayerAddress:    result.Payer,
-			AmountBaseUnits: oc.Price,
+			AmountBaseUnits: effectivePrice,
 			Asset:           oc.Asset,
 			Network:         oc.Network,
 			TxHash:          auth.Nonce,
@@ -224,7 +238,7 @@ func (p *PaymentProcessor) handleOnChainPayment(
 	}
 
 	// 2.2 Non-Idempotent On-Chain Request
-	result, ok := p.verifyOnChainPaymentAndNonce(w, r, route, sc, oc, auth, intentID, settlementID, idemKey, "")
+	result, effectivePrice, ok := p.verifyOnChainPaymentAndNonce(w, r, route, sc, oc, auth, intentID, settlementID, idemKey, "")
 	if !ok {
 		return
 	}
@@ -234,7 +248,7 @@ func (p *PaymentProcessor) handleOnChainPayment(
 		PaymentIntentID: intentID,
 		PaymentMethod:   "onchain",
 		Payer:           auth.Payer,
-		Amount:          oc.Price,
+		Amount:          effectivePrice,
 		Asset:           oc.Asset,
 		Network:         oc.Network,
 		TxHashOrNonce:   auth.Nonce,
@@ -244,7 +258,7 @@ func (p *PaymentProcessor) handleOnChainPayment(
 	p.metrics.IncPaymentsVerified()
 	pCtx := &proxy.PaymentContext{
 		PayerAddress:    result.Payer,
-		AmountBaseUnits: oc.Price,
+		AmountBaseUnits: effectivePrice,
 		Asset:           oc.Asset,
 		Network:         oc.Network,
 		TxHash:          auth.Nonce,
@@ -284,7 +298,21 @@ func (p *PaymentProcessor) issueOnChainChallenge(
 		return
 	}
 	oc := p.resolveOnchain(route)
-	ch := oc.newChallenge(r.URL.Path, 300*time.Second)
+	chPrice := oc.Price
+	var pricingBreakdown map[string]interface{}
+	if p.priceCalculator != nil {
+		if calcPrice, breakdown, err := p.priceCalculator.CalculatePrice(r.Context(), oc.Network, oc.Contract, oc.Price); err == nil && calcPrice > 0 {
+			chPrice = calcPrice
+			pricingBreakdown = breakdown
+		}
+	}
+	ch := oc.newChallengeWithPrice(r.URL.Path, 300*time.Second, chPrice)
+	if pricingBreakdown != nil {
+		if ch.Extensions == nil {
+			ch.Extensions = make(map[string]interface{})
+		}
+		ch.Extensions["pricing"] = pricingBreakdown
+	}
 	if route.AllowedPaymentMethods == "both" {
 		if ch.Extensions == nil {
 			ch.Extensions = make(map[string]interface{})
@@ -292,6 +320,7 @@ func (p *PaymentProcessor) issueOnChainChallenge(
 		ch.Extensions["allowedPaymentMethods"] = "both"
 		ch.Extensions["walletSupported"] = true
 	}
+	p.recordIssuedChallenge(ch)
 	intentID := "pi_" + ch.ChallengeID
 	// Keep Idempotency-Key off the provisional challenged intent so the retry can bind it cleanly.
 	sc.initIntent(route.TenantID, defaultProjectID, "", intentID, "", "onchain", payment.IntentStatusChallenged)
